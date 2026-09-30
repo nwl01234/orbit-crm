@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1020"/><stop offset="1" stop-color="#16224a"/>
+    </linearGradient>
+    <linearGradient id="acc" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="400" fill="url(#bg)"/>
+  <circle cx="1050" cy="80" r="180" fill="#6366f1" opacity="0.12"/>
+  <circle cx="150" cy="360" r="220" fill="#22d3ee" opacity="0.08"/>
+  <ellipse cx="960" cy="200" rx="230" ry="90" fill="none" stroke="url(#acc)" stroke-width="2" opacity="0.7"/>
+  <ellipse cx="960" cy="200" rx="150" ry="58" fill="none" stroke="#6366f1" stroke-width="1.5" opacity="0.5"/>
+  <circle cx="960" cy="142" r="10" fill="#22d3ee"/>
+  <circle cx="1110" cy="200" r="8" fill="#6366f1"/>
+  <text x="70" y="140" fill="#e2e8f0" font-family="Segoe UI, sans-serif" font-size="64" font-weight="700">Orbit CRM</text>
+  <text x="72" y="185" fill="url(#acc)" font-family="Segoe UI, sans-serif" font-size="26" font-weight="600">FastAPI · AI-ассистент · Telegram-бот · RBAC</text>
+  <g font-family="Segoe UI, sans-serif" font-size="20" fill="#c7d2fe">
+    <rect x="70" y="240" width="120" height="44" rx="22" fill="#1e293b" stroke="#334155"/><text x="130" y="268" text-anchor="middle">FastAPI</text>
+    <rect x="200" y="240" width="140" height="44" rx="22" fill="#1e293b" stroke="#334155"/><text x="270" y="268" text-anchor="middle">SQLAlchemy</text>
+    <rect x="350" y="240" width="110" height="44" rx="22" fill="#1e293b" stroke="#334155"/><text x="405" y="268" text-anchor="middle">Tailwind</text>
+    <rect x="470" y="240" width="110" height="44" rx="22" fill="#1e293b" stroke="#334155"/><text x="525" y="268" text-anchor="middle">Alpine.js</text>
+    <rect x="590" y="240" width="110" height="44" rx="22" fill="#1e293b" stroke="#334155"/><text x="645" y="268" text-anchor="middle">aiogram 3</text>
+    <rect x="710" y="240" width="90" height="44" rx="22" fill="#1e293b" stroke="#334155"/><text x="755" y="268" text-anchor="middle">JWT</text>
+  </g>
+  <text x="70" y="340" fill="#94a3b8" font-family="Segoe UI, sans-serif" font-size="18">Корпоративная CRM: клиенты, заявки, задачи, аудит, AI-помощник с RAG</text>
+</svg>

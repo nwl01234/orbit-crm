@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, avatar, empty_state %}
+{% block title %}Сотрудники — {{ app_name }}{% endblock %}
+
+{% block topbar_actions %}
+<button type="button" class="btn btn-primary btn-sm hidden sm:inline-flex" onclick="window.dispatchEvent(new CustomEvent('new-user'))">{{ icon("plus", "icon-sm") }} Сотрудник</button>
+{% endblock %}
+
+{% block content %}
+<div x-data="usersPage()" x-init="init()">
+  <div class="page-head">
+    <div>
+      <p class="eyebrow">Administration</p>
+      <h1 class="page-title">Сотрудники и доступы</h1>
+      <p class="page-sub">Управляйте командой, ролями и привязкой Telegram. Все изменения фиксируются в журнале аудита.</p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <a href="/logs" class="btn btn-secondary">{{ icon("history", "icon-sm") }} Журнал</a>
+      <button type="button" class="btn btn-primary" @click="openCreate()">{{ icon("plus", "icon-sm") }} Добавить сотрудника</button>
+    </div>
+  </div>
+
+  <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="kpi kpi-accent"><p class="kpi-label">{{ icon("users", "icon-sm") }} Активных</p><p class="kpi-value">{{ users|selectattr('is_active')|list|length }}</p><p class="kpi-note">из {{ users|length }} {{ users|length|plural('аккаунта', 'аккаунтов', 'аккаунтов') }}</p></div>
+    <div class="kpi"><p class="kpi-label">{{ icon("shield", "icon-sm") }} Администраторы</p><p class="kpi-value">{{ users|selectattr('role', 'equalto', 'admin')|selectattr('is_active')|list|length }}</p><p class="kpi-note">полный доступ</p></div>
+    <div class="kpi"><p class="kpi-label">{{ icon("briefcase", "icon-sm") }} Сотрудники</p><p class="kpi-value">{{ users|selectattr('role', 'equalto', 'employee')|selectattr('is_active')|list|length }}</p><p class="kpi-note">работа со сделками</p></div>
+    <div class="kpi"><p class="kpi-label">{{ icon("send", "icon-sm") }} Telegram</p><p class="kpi-value">{{ users|selectattr('telegram_id')|list|length }}</p><p class="kpi-note">привязанных аккаунтов</p></div>
+  </div>
+
+  <section class="card mt-4 overflow-hidden">
+    <div class="card-header">
+      <div><h2 class="card-title">Команда</h2><p class="card-hint">Роли и последняя активность</p></div>
+      <div class="search-box w-[200px]"><svg class="icon icon-sm"><use href="#i-search"></use></svg><input type="search" x-model="q" placeholder="Найти сотрудника…" aria-label="Поиск сотрудников"></div>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Сотрудник</th><th>Роль</th><th>Контакты</th><th>Telegram</th><th>Последний вход</th><th>Статус</th><th class="w-24 text-right">Действия</th></tr></thead>
+        <tbody>
+          <template x-for="person in filtered" :key="person.id">
+            <tr :class="!person.is_active ? 'row-muted' : ''">
+              <td>
+                <div class="flex items-center gap-2.5">
+                  <span class="avatar" x-text="person.initials || initials(person.full_name)"></span>
+                  <span class="min-w-0"><span class="block text-[12.5px] font-semibold text-ink" x-text="person.full_name"></span><span class="block text-[10.5px] text-ink-dim" x-text="'@' + person.username + (person.job_title ? ' · ' + person.job_title : '')"></span></span>
+                </div>
+              </td>
+              <td><span class="chip" :class="person.role === 'admin' ? 'chip-accent' : 'chip-neutral'" x-text="person.role === 'admin' ? 'Администратор' : 'Сотрудник'"></span></td>
+              <td><a class="block text-[11px] text-ink-soft hover:text-accent" :href="'mailto:' + person.email" x-text="person.email"></a><span class="block text-[10.5px] text-ink-dim" x-text="person.phone || '—'"></span></td>
+              <td><span class="chip chip-neutral" x-show="person.telegram_id" x-text="'ID ' + person.telegram_id"></span><span class="text-[11px] text-ink-dim" x-show="!person.telegram_id">не привязан</span></td>
+              <td class="whitespace-nowrap text-[11px] text-ink-dim" x-text="person.last_login_at ? relativeTime(person.last_login_at) : 'ещё не входил'"></td>
+              <td><span class="chip" :class="person.is_active ? 'status-done' : 'status-cancelled'" x-text="person.is_active ? 'Активен' : 'Отключён'"></span></td>
+              <td class="text-right">
+                <div class="flex items-center justify-end gap-0.5">
+                  <button type="button" class="btn-icon-sm" @click="openEdit(person)" aria-label="Редактировать"><svg class="icon icon-sm"><use href="#i-edit"></use></svg></button>
+                  <button type="button" class="btn-icon-sm" :class="person.is_active ? 'hover:text-rose-600' : 'hover:text-emerald-600'" @click="toggleActive(person)" :aria-label="person.is_active ? 'Отключить' : 'Включить'">
+                    <svg class="icon icon-sm"><use :href="person.is_active ? '#i-lock' : '#i-check'"></use></svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+      <div x-show="!filtered.length" class="empty-state">
+        <span class="empty-icon"><svg class="icon"><use href="#i-users"></use></svg></span>
+        <p class="text-[13px] font-semibold text-ink">Сотрудники не найдены</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="mt-4 rounded-xl border border-line bg-white p-4">
+    <div class="flex items-start gap-3">
+      <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent">{{ icon("shield", "icon-sm") }}</span>
+      <div><p class="text-[12px] font-semibold text-ink">Модель доступа</p><p class="mt-1 text-[11.5px] leading-relaxed text-ink-muted">Администраторы управляют сотрудниками, журналом и Telegram-ботом. Сотрудники работают со сделками, компаниями и контактами. Отключение аккаунта не удаляет историю — сделки и аудит сохраняются.</p></div>
+    </div>
+  </div>
+
+  <div class="hidden">
+    {% for person in users %}
+    <script type="application/json" id="user-data-{{ person.id }}">{{ {
+      "id": person.id, "username": person.username, "email": person.email, "full_name": person.full_name,
+      "role": person.role, "job_title": person.job_title, "phone": person.phone,
+      "telegram_id": person.telegram_id, "is_active": person.is_active,
+      "initials": person.initials,
+      "last_login_at": person.last_login_at.isoformat() if person.last_login_at else None,
+      "created_at": person.created_at.isoformat() if person.created_at else None
+    }|tojson }}</script>
+    {% endfor %}
+  </div>
+
+  <div x-show="modalOpen" x-cloak class="modal-backdrop" @click.self="modalOpen = false" @keydown.escape.window="modalOpen = false">
+    <div class="modal-panel max-w-[620px] animate-fade-up">
+      <div class="modal-head">
+        <div><h2 class="text-[15px] font-semibold text-ink" x-text="editing ? 'Редактирование сотрудника' : 'Новый сотрудник'"></h2><p class="mt-0.5 text-[11px] text-ink-dim" x-text="editing ? 'Роль, контакты и доступ' : 'Создайте аккаунт и задайте пароль'"></p></div>
+        <button type="button" class="btn-icon" @click="modalOpen = false" aria-label="Закрыть">{{ icon("x") }}</button>
+      </div>
+      <form @submit.prevent="save()">
+        <div class="modal-body space-y-4">
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div><label class="label">Полное имя *</label><input class="field" x-model.trim="form.full_name" required maxlength="255" placeholder="Анна Морозова"></div>
+            <div><label class="label">Должность</label><input class="field" x-model.trim="form.job_title" placeholder="Менеджер по продажам"></div>
+            <div x-show="!editing"><label class="label">Логин *</label><input class="field" x-model.trim="form.username" :required="!editing" autocomplete="off" placeholder="a.morozova"></div>
+            <div><label class="label">Email *</label><input type="email" class="field" x-model.trim="form.email" required></div>
+            <div><label class="label">Телефон</label><input class="field" x-model.trim="form.phone"></div>
+            <div><label class="label">Роль</label><select class="field" x-model="form.role"><option value="employee">Сотрудник</option><option value="admin">Администратор</option></select></div>
+            <div><label class="label" x-text="editing ? 'Новый пароль' : 'Пароль *'"></label><input type="password" class="field" x-model="form.password" :required="!editing" minlength="6" autocomplete="new-password" placeholder="Минимум 6 символов"><p class="field-hint" x-show="editing">Оставьте пустым, чтобы не менять</p></div>
+            <div><label class="label">Telegram ID</label><input class="field font-mono text-[12px]" x-model.trim="form.telegram_id" placeholder="123456789"><p class="field-hint">Можно получить у @userinfobot</p></div>
+          </div>
+          <label class="flex cursor-pointer items-center gap-2 text-[12px] font-medium text-ink-soft" x-show="editing"><input type="checkbox" class="h-3.5 w-3.5 rounded border-line-strong text-accent focus:ring-accent/25" x-model="form.is_active"> Аккаунт активен</label>
+          <p x-show="error" x-cloak class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] font-medium text-rose-700" x-text="error"></p>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn btn-secondary" @click="modalOpen = false">Отмена</button>
+          <button type="submit" class="btn btn-primary" :disabled="saving" x-text="saving ? 'Сохраняем…' : (editing ? 'Сохранить' : 'Создать сотрудника')"></button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.usersPage = function () {
+  const empty = () => ({ username: '', full_name: '', email: '', job_title: '', phone: '', role: 'employee', password: '', telegram_id: '', is_active: true });
+  return {
+    people: {{ users|map(attribute='id')|list|tojson }}.map((id) => {
+      const node = document.getElementById('user-data-' + id);
+      return node ? JSON.parse(node.textContent) : null;
+    }).filter(Boolean),
+    q: '', modalOpen: false, saving: false, error: '', editing: null, form: empty(),
+    init() { window.addEventListener('new-user', () => this.openCreate()); },
+    get filtered() {
+      const needle = this.q.trim().toLowerCase();
+      if (!needle) return this.people;
+      return this.people.filter((person) => [person.full_name, person.username, person.email, person.job_title].join(' ').toLowerCase().includes(needle));
+    },
+    openCreate() { this.editing = null; this.error = ''; this.form = empty(); this.modalOpen = true; },
+    openEdit(person) {
+      this.editing = person.id; this.error = '';
+      this.form = Object.assign(empty(), {
+        username: person.username, full_name: person.full_name, email: person.email,
+        job_title: person.job_title, phone: person.phone, role: person.role,
+        password: '', telegram_id: person.telegram_id ? String(person.telegram_id) : '', is_active: person.is_active,
+      });
+      this.modalOpen = true;
+    },
+    async save() {
+      this.saving = true; this.error = '';
+      const payload = {
+        full_name: this.form.full_name, email: this.form.email, job_title: this.form.job_title,
+        phone: this.form.phone, role: this.form.role,
+      };
+      if (this.form.password) payload.password = this.form.password;
+      if (this.editing) payload.is_active = this.form.is_active;
+      try {
+        let person;
+        if (this.editing) {
+          person = await apiJson('/api/users/' + this.editing, { method: 'PATCH', body: JSON.stringify(payload) });
+        } else {
+          person = await apiJson('/api/users', {
+            method: 'POST',
+            body: JSON.stringify(Object.assign(payload, { username: this.form.username, password: this.form.password })),
+          });
+        }
+        if (this.form.telegram_id !== undefined) {
+          await apiJson('/api/users/' + person.id + '/telegram', { method: 'PATCH', body: JSON.stringify({ telegram_id: this.form.telegram_id || null }) });
+        }
+        window.location.href = '/users?msg=' + encodeURIComponent(this.editing ? 'Сотрудник обновлён' : 'Сотрудник создан');
+      } catch (error) { this.error = error.message; }
+      finally { this.saving = false; }
+    },
+    async toggleActive(person) {
+      const ok = await confirmAction({
+        title: person.is_active ? 'Отключить сотрудника?' : 'Включить сотрудника?',
+        text: person.is_active ? 'Аккаунт «' + person.full_name + '» не сможет входить в систему.' : 'Аккаунт «' + person.full_name + '» снова получит доступ.',
+        confirmText: person.is_active ? 'Отключить' : 'Включить', danger: person.is_active,
+      });
+      if (!ok) return;
+      try {
+        const updated = await apiJson('/api/users/' + person.id, { method: 'PATCH', body: JSON.stringify({ is_active: !person.is_active }) });
+        person.is_active = updated.is_active;
+        toast(updated.is_active ? 'Доступ восстановлен' : 'Доступ отключён');
+      } catch (error) { toast(error.message, 'error'); }
+    },
+  };
+};
+</script>
+{% endblock %}

@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, avatar %}
+{% block title %}AI-ассистент — {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Orbit intelligence</p>
+    <h1 class="page-title">AI-ассистент</h1>
+    <p class="page-sub">Задавайте вопросы о сделках, клиентах и просрочках. Ассистент использует данные CRM и работает даже без внешней модели.</p>
+  </div>
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="chip {{ 'chip-accent' if ai_enabled else 'chip-neutral' }}"><span class="dot"></span>{{ 'Semantic AI' if ai_enabled else 'Rule-based' }}</span>
+    <button type="button" class="btn btn-secondary" onclick="window.dispatchEvent(new CustomEvent('reindex'))">{{ icon("refresh", "icon-sm") }} Переиндексировать</button>
+  </div>
+</div>
+
+<div class="grid gap-4 xl:grid-cols-[1.6fr_1fr]" x-data="chatPage()" x-init="init()">
+  <section class="card flex min-h-[620px] flex-col overflow-hidden">
+    <div class="card-header">
+      <div class="flex items-center gap-2.5">
+        <span class="grid h-8 w-8 place-items-center rounded-lg bg-accent-soft text-accent">{{ icon("sparkles", "icon-sm") }}</span>
+        <div><h2 class="card-title">Диалог с CRM</h2><p class="card-hint" x-text="status.indexed + ' из ' + status.total + ' сделок в индексе'"></p></div>
+      </div>
+      <span class="flex items-center gap-1.5 text-[10.5px] text-ink-dim"><span class="h-1.5 w-1.5 rounded-full" :class="status.enabled ? 'bg-emerald-500' : 'bg-amber-500'"></span><span x-text="status.enabled ? 'модель подключена' : 'локальный режим'"></span></span>
+    </div>
+
+    <div class="flex-1 space-y-4 overflow-y-auto bg-zinc-50/40 p-5" x-ref="scroll">
+      <div class="flex gap-3">
+        <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-ink text-white">{{ icon("sparkles", "icon-sm") }}</span>
+        <div class="max-w-[85%] rounded-2xl rounded-tl-md border border-line bg-white px-4 py-3 shadow-card">
+          <p class="text-[12.5px] leading-relaxed text-ink-soft">Здравствуйте! Я вижу сделки, клиентов, задачи и просрочки в этой CRM. Спросите, например: «Что горит сегодня?», «Кто из клиентов приносит больше всего?» или «Сколько сделок в работе у команды?».</p>
+        </div>
+      </div>
+
+      <template x-for="(message, index) in messages" :key="index">
+        <div class="flex gap-3" :class="message.role === 'user' ? 'flex-row-reverse' : ''">
+          <template x-if="message.role === 'user'">
+            <span class="avatar h-8 w-8 shrink-0 text-[10px]">{{ user.full_name|initials }}</span>
+          </template>
+          <template x-if="message.role !== 'user'">
+            <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-ink text-white">{{ icon("sparkles", "icon-sm") }}</span>
+          </template>
+          <div class="max-w-[85%] rounded-2xl px-4 py-3" :class="message.role === 'user' ? 'rounded-tr-md bg-ink text-white' : 'rounded-tl-md border border-line bg-white text-ink-soft shadow-card'">
+            <p class="whitespace-pre-line text-[12.5px] leading-relaxed" x-text="message.content"></p>
+          </div>
+        </div>
+      </template>
+
+      <div x-show="loading" x-cloak class="flex gap-3">
+        <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-ink text-white">{{ icon("sparkles", "icon-sm") }}</span>
+        <div class="rounded-2xl rounded-tl-md border border-line bg-white px-4 py-3 shadow-card">
+          <span class="flex items-center gap-1"><span class="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-dim"></span><span class="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-dim" style="animation-delay:.12s"></span><span class="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-dim" style="animation-delay:.24s"></span></span>
+        </div>
+      </div>
+
+      <div x-show="!messages.length && !loading" class="grid gap-2 pt-1 sm:grid-cols-2">
+        <template x-for="suggestion in suggestions" :key="suggestion">
+          <button type="button" class="rounded-xl border border-line bg-white p-3 text-left text-[11.5px] leading-snug text-ink-muted transition hover:border-accent/40 hover:bg-accent-soft/40 hover:text-ink" @click="ask(suggestion)" x-text="suggestion"></button>
+        </template>
+      </div>
+    </div>
+
+    <form class="border-t border-line bg-white p-3" @submit.prevent="send()">
+      <div class="flex items-end gap-2">
+        <textarea class="field max-h-[140px] min-h-[44px] flex-1 resize-none py-2.5" x-model="draft" @keydown.enter.prevent="if (!$event.shiftKey) send()" placeholder="Спросите что-нибудь о сделках…" rows="1"></textarea>
+        <button type="submit" class="btn btn-primary h-10" :disabled="loading || !draft.trim()">{{ icon("send", "icon-sm") }} Отправить</button>
+      </div>
+      <p class="mt-1.5 text-[10px] text-ink-dim">Enter — отправить · Shift+Enter — новая строка. Ответы генерируются по данным вашей CRM.</p>
+    </form>
+  </section>
+
+  <aside class="space-y-4">
+    <section class="card">
+      <div class="card-header"><h2 class="card-title">Что умеет ассистент</h2></div>
+      <div class="card-body space-y-3.5">
+        <div class="flex gap-3"><span class="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-zinc-100 text-ink-muted">{{ icon("inbox", "icon-sm") }}</span><div><p class="text-[11.5px] font-semibold text-ink">Находит сделки</p><p class="mt-0.5 text-[10.5px] leading-relaxed text-ink-dim">По клиенту, сумме, статусу или описанию.</p></div></div>
+        <div class="flex gap-3"><span class="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-zinc-100 text-ink-muted">{{ icon("alert", "icon-sm") }}</span><div><p class="text-[11.5px] font-semibold text-ink">Подсвечивает риски</p><p class="mt-0.5 text-[10.5px] leading-relaxed text-ink-dim">Просрочки, срочные сделки и незакрытые задачи.</p></div></div>
+        <div class="flex gap-3"><span class="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-zinc-100 text-ink-muted">{{ icon("chart", "icon-sm") }}</span><div><p class="text-[11.5px] font-semibold text-ink">Считает показатели</p><p class="mt-0.5 text-[10.5px] leading-relaxed text-ink-dim">Воронку, суммы, конверсию и загрузку команды.</p></div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header"><h2 class="card-title">Состояние индекса</h2></div>
+      <div class="card-body">
+        <div class="flex items-end justify-between"><span class="text-[11px] uppercase tracking-[0.1em] text-ink-dim">Проиндексировано</span><span class="font-display text-[22px] font-semibold text-ink" x-text="status.indexed"></span></div>
+        <div class="metric-bar mt-2"><span :style="'width:' + (status.total ? Math.round(status.indexed / status.total * 100) : 0) + '%'"></span></div>
+        <dl class="mt-4 space-y-2 text-[11px]">
+          <div class="flex justify-between"><dt class="text-ink-dim">Режим</dt><dd class="font-medium text-ink-soft" x-text="status.mode === 'semantic' ? 'Semantic' : 'Rule-based'"></dd></div>
+          <div class="flex justify-between"><dt class="text-ink-dim">Модель</dt><dd class="font-mono text-[10px] text-ink-soft" x-text="status.model || '—'"></dd></div>
+          <div class="flex justify-between"><dt class="text-ink-dim">Эмбеддинги</dt><dd class="font-mono text-[10px] text-ink-soft" x-text="status.embed_model || '—'"></dd></div>
+        </dl>
+        <button type="button" class="btn btn-secondary btn-sm mt-4 w-full" @click="reindex()" :disabled="reindexing" x-text="reindexing ? 'Индексируем…' : 'Обновить индекс'"></button>
+      </div>
+    </section>
+
+    <section class="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+      <div class="flex gap-2.5"><span class="mt-0.5 text-amber-600">{{ icon("lock", "icon-sm") }}</span><div><p class="text-[11.5px] font-semibold text-amber-900">Данные остаются внутри</p><p class="mt-1 text-[10.5px] leading-relaxed text-amber-800/80">При локальной модели запросы не покидают сервер. Внешний провайдер используется только если он явно настроен в .env.</p></div></div>
+    </section>
+  </aside>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.chatPage = function () {
+  return {
+    messages: [], draft: '', loading: false, reindexing: false,
+    status: { enabled: false, indexed: 0, total: 0, mode: 'rule-based', model: null, embed_model: null },
+    suggestions: [
+      'Что горит сегодня?',
+      'Сколько сделок в работе и на какую сумму?',
+      'Кто из клиентов приносит больше всего?',
+      'Покажи просроченные задачи и сделки',
+      'Какие сделки без ответственного?',
+      'Сводка по воронке за последние 30 дней',
+    ],
+    init() {
+      this.loadStatus();
+      window.addEventListener('reindex', () => this.reindex());
+    },
+    async loadStatus() {
+      try { this.status = await apiJson('/api/ai/status'); }
+      catch { /* статус не критичен */ }
+    },
+    ask(text) { this.draft = text; this.send(); },
+    async send() {
+      const text = this.draft.trim();
+      if (!text || this.loading) return;
+      this.messages.push({ role: 'user', content: text });
+      this.draft = '';
+      this.loading = true;
+      this.scroll();
+      try {
+        const history = this.messages.slice(-10);
+        const data = await apiJson('/api/ai/chat', { method: 'POST', body: JSON.stringify({ messages: history }) });
+        this.messages.push({ role: 'assistant', content: data.answer || 'Не удалось получить ответ.' });
+      } catch (error) {
+        this.messages.push({ role: 'assistant', content: 'Ошибка: ' + error.message });
+      } finally {
+        this.loading = false;
+        this.scroll();
+      }
+    },
+    async reindex() {
+      if (this.reindexing) return;
+      this.reindexing = true;
+      try {
+        const data = await apiJson('/api/ai/reindex', { method: 'POST' });
+        toast('Проиндексировано сделок: ' + data.indexed);
+        this.loadStatus();
+      } catch (error) { toast(error.message, 'error'); }
+      finally { this.reindexing = false; }
+    },
+    scroll() {
+      this.$nextTick(() => {
+        const el = this.$refs.scroll;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    },
+  };
+};
+</script>
+{% endblock %}

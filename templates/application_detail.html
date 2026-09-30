@@ -1,0 +1,518 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, avatar, status_badge, priority_badge, empty_state %}
+{% block title %}{{ app.title }} — {{ app_name }}{% endblock %}
+
+{% block topbar_actions %}
+<a href="/applications" class="btn btn-secondary btn-sm hidden sm:inline-flex">{{ icon("chevron-left", "icon-sm") }} К списку</a>
+{% endblock %}
+
+{% block content %}
+<script type="application/json" id="app-data">{{ payload|tojson }}</script>
+<div x-data="applicationDetail()" x-init="init()">
+  <nav class="mb-4 flex items-center gap-1.5 text-[11px] text-ink-dim" aria-label="Хлебные крошки">
+    <a href="/" class="hover:text-ink">Обзор</a>
+    <span>/</span>
+    <a href="/applications" class="hover:text-ink">Сделки</a>
+    <span>/</span>
+    <span class="font-medium text-ink-muted">#{{ app.id }}</span>
+  </nav>
+
+  <div class="page-head">
+    <div class="min-w-0">
+      <div class="mb-2 flex flex-wrap items-center gap-2">
+        <span class="chip" :class="statusChip(status)" x-text="statusLabel(status)"></span>
+        <span class="chip" :class="priorityChip(priority)" x-text="priorityLabel(priority)"></span>
+        <span class="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-dim">#{{ app.id }} · {{ app.category|categoryLabel }}</span>
+      </div>
+      <h1 class="page-title max-w-3xl">{{ app.title }}</h1>
+      <p class="page-sub">
+        Создана {{ app.created_at|dt }}{% if app.created_by %} · {{ app.created_by.full_name }}{% endif %}
+        {% if app.source %} · источник {{ app.source|sourceLabel }}{% endif %}
+      </p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <button type="button" class="btn btn-secondary" @click="toggleStar()" :aria-pressed="starred">
+        <svg class="icon icon-sm" :class="starred ? 'fill-amber-400 text-amber-500' : 'text-ink-dim'"><use href="#i-star"></use></svg>
+        <span x-text="starred ? 'В избранном' : 'В избранное'"></span>
+      </button>
+      {% if ai_enabled %}
+      <button type="button" class="btn btn-secondary" @click="analyze()" :disabled="aiLoading">
+        <svg class="icon icon-sm" :class="aiLoading ? 'animate-pulse text-accent' : 'text-accent'"><use href="#i-sparkles"></use></svg>
+        <span x-text="aiLoading ? 'Анализируем…' : 'AI-анализ'"></span>
+      </button>
+      {% endif %}
+      <button type="button" class="btn btn-primary" @click="openEdit()">{{ icon("edit", "icon-sm") }} Редактировать</button>
+      <button type="button" class="btn btn-ghost text-rose-600 hover:bg-rose-50" @click="remove()" aria-label="Удалить сделку">{{ icon("trash", "icon-sm") }}</button>
+    </div>
+  </div>
+
+  <div class="grid gap-4 xl:grid-cols-[1.55fr_1fr]">
+    <div class="space-y-4">
+      <section class="card">
+        <div class="card-header">
+          <h2 class="card-title">Описание</h2>
+          <span class="text-[10.5px] text-ink-dim">обновлено {{ app.updated_at|relative }}</span>
+        </div>
+        <div class="card-body">
+          {% if app.description %}
+          <p class="whitespace-pre-line text-[13px] leading-relaxed text-ink-soft">{{ app.description }}</p>
+          {% else %}
+          <p class="text-[12.5px] text-ink-dim">Описание не заполнено. Добавьте контекст, договорённости и следующий шаг.</p>
+          {% endif %}
+          {% if app.tags %}
+          <div class="mt-4 flex flex-wrap gap-1.5">
+            {% for tag in app.tags.split(',') if tag.strip() %}
+            <a class="chip chip-neutral" href="/applications?q={{ tag.strip()|urlencode }}">#{{ tag.strip() }}</a>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+      </section>
+
+      <section class="card" x-show="summary" x-cloak>
+        <div class="card-header">
+          <div class="flex items-center gap-2">
+            <span class="grid h-7 w-7 place-items-center rounded-lg bg-accent-soft text-accent">{{ icon("sparkles", "icon-sm") }}</span>
+            <div>
+              <h2 class="card-title">AI-резюме</h2>
+              <p class="card-hint">Сгенерировано по описанию сделки</p>
+            </div>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" @click="summary = ''">Скрыть</button>
+        </div>
+        <div class="card-body">
+          <p class="text-[13px] leading-relaxed text-ink-soft" x-text="summary"></p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">Задачи</h2>
+            <p class="card-hint">{{ tasks|selectattr('is_done', 'equalto', false)|list|length }} открытых · {{ tasks|length }} всего</p>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" @click="taskOpen = !taskOpen">{{ icon("plus", "icon-sm") }} Задача</button>
+        </div>
+
+        <div x-show="taskOpen" x-cloak class="border-b border-line bg-zinc-50/60 p-4">
+          <form @submit.prevent="addTask()" class="grid gap-2 sm:grid-cols-[1fr_130px_140px_150px_auto]">
+            <input class="field field-sm" x-model.trim="taskForm.title" placeholder="Что нужно сделать?" required>
+            <select class="field field-sm" x-model="taskForm.kind">
+              {% for key, label in task_kind_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+            </select>
+            <input type="date" class="field field-sm" x-model="taskForm.due_date">
+            <select class="field field-sm" x-model.number="taskForm.user_id">
+              {% for member in users %}<option value="{{ member.id }}">{{ member.full_name }}</option>{% endfor %}
+            </select>
+            <button type="submit" class="btn btn-primary btn-sm" :disabled="taskSaving" x-text="taskSaving ? '…' : 'Добавить'"></button>
+          </form>
+        </div>
+
+        <div class="divide-y divide-line/80">
+          {% for task in tasks %}
+          <div class="flex items-start gap-3 px-5 py-3" data-task x-data="taskRow({{ task.id }}, {{ 'true' if task.is_done else 'false' }})">
+            <button type="button" class="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md border transition" :class="done ? 'border-accent bg-accent text-white' : 'border-line-strong bg-white text-transparent hover:border-accent/50'" @click="toggle()" :aria-pressed="done">
+              <svg class="icon" style="height:12px;width:12px"><use href="#i-check"></use></svg>
+            </button>
+            <div class="min-w-0 flex-1">
+              <p class="text-[12.5px] font-medium leading-snug" :class="done ? 'text-ink-dim line-through' : 'text-ink'">{{ task.title }}</p>
+              <p class="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10.5px] text-ink-dim">
+                <span>{{ taskKindLabel(task.kind) }}</span>
+                {% if task.due_date %}<span>·</span><span class="{{ 'text-rose-600 font-semibold' if is_overdue(task.due_date, 'new') else '' }}">{{ task.due_date|day_label }}</span>{% endif %}
+                <span>·</span><span>{{ task.user.full_name if task.user else '—' }}</span>
+              </p>
+            </div>
+            <button type="button" class="btn-icon-sm text-ink-dim hover:text-rose-600" @click="remove()" aria-label="Удалить задачу"><svg class="icon icon-sm"><use href="#i-trash"></use></svg></button>
+          </div>
+          {% else %}
+          <div class="px-5 py-8 text-center">
+            <p class="text-[12.5px] font-medium text-ink-muted">Задач пока нет</p>
+            <p class="mt-1 text-[11px] text-ink-dim">Запланируйте звонок, встречу или письмо</p>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">Комментарии</h2>
+            <p class="card-hint">{{ comments|length }} в обсуждении</p>
+          </div>
+        </div>
+        <div class="divide-y divide-line/80">
+          {% for comment in comments %}
+          <div class="flex gap-3 px-5 py-4">
+            {{ avatar(comment.user.full_name if comment.user else '?', 'avatar-sm') }}
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-2">
+                <p class="text-[12px] font-semibold text-ink">{{ comment.user.full_name if comment.user else 'Сотрудник' }}</p>
+                <span class="text-[10.5px] text-ink-dim">{{ comment.created_at|relative }}</span>
+                {% if comment.is_internal %}<span class="chip chip-neutral h-[18px] px-1.5 text-[9px]">внутренний</span>{% endif %}
+                {% if user and (comment.user_id == user.id or user.role == 'admin') %}
+                <button type="button" class="ml-auto text-[10px] text-ink-dim hover:text-rose-600" @click="deleteComment({{ comment.id }})">Удалить</button>
+                {% endif %}
+              </div>
+              <p class="mt-1 whitespace-pre-line text-[12.5px] leading-relaxed text-ink-soft">{{ comment.text }}</p>
+            </div>
+          </div>
+          {% else %}
+          <div class="px-5 py-8 text-center">
+            <p class="text-[12.5px] font-medium text-ink-muted">Обсуждение пустое</p>
+            <p class="mt-1 text-[11px] text-ink-dim">Оставьте первый комментарий — команда увидит его здесь</p>
+          </div>
+          {% endfor %}
+        </div>
+        <form class="border-t border-line bg-zinc-50/50 p-4" @submit.prevent="addComment()">
+          <div class="flex gap-3">
+            {{ avatar(user.full_name if user else '?', 'avatar-sm') }}
+            <div class="flex-1">
+              <textarea class="field min-h-[72px] resize-y" x-model.trim="commentText" placeholder="Написать комментарий…" required maxlength="5000"></textarea>
+              <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
+                <label class="flex cursor-pointer items-center gap-2 text-[11px] text-ink-muted">
+                  <input type="checkbox" class="h-3.5 w-3.5 rounded border-line-strong text-accent focus:ring-accent/25" x-model="internal"> Внутренний комментарий
+                </label>
+                <button type="submit" class="btn btn-primary btn-sm" :disabled="commentSaving || !commentText">
+                  {{ icon("send", "icon-sm") }} <span x-text="commentSaving ? 'Отправляем…' : 'Отправить'"></span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </form>
+      </section>
+    </div>
+
+    <aside class="space-y-4">
+      <section class="card">
+        <div class="card-header">
+          <h2 class="card-title">Клиент</h2>
+          {% if app.company or app.contact %}
+          <a class="btn btn-ghost btn-sm" href="{% if app.company %}/companies/{{ app.company.id }}{% elif app.contact %}/contacts/{{ app.contact.id }}{% endif %}">Карточка {{ icon("arrow-right", "icon-sm") }}</a>
+          {% endif %}
+        </div>
+        <div class="card-body space-y-3">
+          {% if app.company %}
+          <a href="/companies/{{ app.company.id }}" class="flex items-center gap-3 rounded-xl border border-line bg-zinc-50/60 p-3 transition hover:border-line-strong">
+            <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white text-ink-muted shadow-sm">{{ icon("building", "icon-sm") }}</span>
+            <span class="min-w-0">
+              <span class="block truncate text-[12.5px] font-semibold text-ink">{{ app.company.name }}</span>
+              <span class="block truncate text-[10.5px] text-ink-dim">{{ app.company.industry or app.company.domain or 'Компания' }}</span>
+            </span>
+            {{ icon("chevron-right", "ml-auto icon-sm text-ink-dim") }}
+          </a>
+          {% endif %}
+          {% if app.contact %}
+          <a href="/contacts/{{ app.contact.id }}" class="flex items-center gap-3 rounded-xl border border-line p-3 transition hover:border-line-strong">
+            {{ avatar(app.contact.full_name, 'avatar-sm') }}
+            <span class="min-w-0">
+              <span class="block truncate text-[12.5px] font-semibold text-ink">{{ app.contact.full_name }}</span>
+              <span class="block truncate text-[10.5px] text-ink-dim">{{ app.contact.position or 'Контактное лицо' }}</span>
+            </span>
+            {{ icon("chevron-right", "ml-auto icon-sm text-ink-dim") }}
+          </a>
+          {% endif %}
+          <dl class="space-y-2.5 text-[11.5px]">
+            {% if app.client_email %}
+            <div class="flex items-start gap-2"><span class="mt-0.5 text-ink-dim">{{ icon("mail", "icon-sm") }}</span><a class="break-all text-ink-soft hover:text-accent" href="mailto:{{ app.client_email }}">{{ app.client_email }}</a></div>
+            {% endif %}
+            {% if app.client_phone %}
+            <div class="flex items-start gap-2"><span class="mt-0.5 text-ink-dim">{{ icon("phone", "icon-sm") }}</span><a class="text-ink-soft hover:text-accent" href="tel:{{ app.client_phone }}">{{ app.client_phone }}</a></div>
+            {% endif %}
+            {% if app.company and app.company.website %}
+            <div class="flex items-start gap-2"><span class="mt-0.5 text-ink-dim">{{ icon("globe", "icon-sm") }}</span><a class="truncate text-ink-soft hover:text-accent" href="{{ app.company.website if app.company.website.startswith('http') else 'https://' + app.company.website }}" target="_blank" rel="noopener noreferrer">{{ app.company.website }}</a></div>
+            {% endif %}
+          </dl>
+          {% if not app.company and not app.contact and not app.client_name %}
+          <p class="text-[11.5px] text-ink-dim">Клиент не привязан. Укажите компанию или контакт при редактировании.</p>
+          {% endif %}
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2 class="card-title">Параметры сделки</h2>
+          <button type="button" class="btn-icon-sm" @click="openEdit()" aria-label="Изменить">{{ icon("edit", "icon-sm") }}</button>
+        </div>
+        <div class="card-body">
+          <p class="mb-4 font-display text-[26px] font-semibold tracking-[-0.03em] text-ink">{{ app.amount|money }}</p>
+          <dl class="space-y-2.5 text-[11.5px]">
+            <div class="flex items-center justify-between gap-3"><dt class="text-ink-dim">Ответственный</dt><dd class="flex items-center gap-1.5 font-medium text-ink-soft">{% if app.assigned_to %}{{ avatar(app.assigned_to.full_name, 'avatar-sm h-5 w-5 text-[8px]') }}{{ app.assigned_to.full_name }}{% else %}Не назначен{% endif %}</dd></div>
+            <div class="flex items-center justify-between gap-3"><dt class="text-ink-dim">Срок</dt><dd class="{{ 'overdue' if is_overdue(app.due_date, app.status) else 'font-medium text-ink-soft' }}">{{ app.due_date|day_label if app.due_date else '—' }}</dd></div>
+            <div class="flex items-center justify-between gap-3"><dt class="text-ink-dim">Категория</dt><dd class="font-medium text-ink-soft">{{ app.category|categoryLabel }}</dd></div>
+            <div class="flex items-center justify-between gap-3"><dt class="text-ink-dim">Источник</dt><dd class="font-medium text-ink-soft">{{ app.source|sourceLabel }}</dd></div>
+            <div class="flex items-center justify-between gap-3"><dt class="text-ink-dim">Создана</dt><dd class="font-medium text-ink-soft">{{ app.created_at|dt('%d.%m.%Y') }}</dd></div>
+            {% if app.closed_at %}<div class="flex items-center justify-between gap-3"><dt class="text-ink-dim">Закрыта</dt><dd class="font-medium text-ink-soft">{{ app.closed_at|dt('%d.%m.%Y') }}</dd></div>{% endif %}
+            {% if app.lost_reason %}<div><dt class="text-ink-dim">Причина отказа</dt><dd class="mt-1 rounded-lg bg-rose-50 px-2.5 py-1.5 text-[11.5px] text-rose-700">{{ app.lost_reason }}</dd></div>{% endif %}
+          </dl>
+
+          <div class="mt-4 border-t border-line pt-3.5">
+            <p class="section-label mb-2">Быстрая смена статуса</p>
+            <div class="flex flex-wrap gap-1.5">
+              <template x-for="option in statusOptions" :key="option">
+                <button type="button" class="chip" :class="status === option ? statusChip(option) : 'chip-neutral hover:border-line-strong'" @click="changeStatus(option)" :disabled="status === option" x-text="statusLabel(option)"></button>
+              </template>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {% if related %}
+      <section class="card">
+        <div class="card-header"><h2 class="card-title">Другие сделки клиента</h2><span class="chip chip-neutral">{{ related|length }}</span></div>
+        <div class="divide-y divide-line/80">
+          {% for item in related %}
+          <a href="/applications/{{ item.id }}" class="flex items-center gap-2 px-5 py-3 hover:bg-zinc-50">
+            <span class="min-w-0 flex-1">
+              <span class="block truncate text-[11.5px] font-medium text-ink">{{ item.title }}</span>
+              <span class="mt-0.5 block text-[10px] text-ink-dim">{{ item.amount|money }} · {{ item.created_at|dt('%d.%m.%Y') }}</span>
+            </span>
+            {{ status_badge(item.status) }}
+          </a>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+
+      <section class="card">
+        <div class="card-header"><h2 class="card-title">История</h2><a href="/logs?q={{ app.id }}" class="btn btn-ghost btn-sm">Аудит</a></div>
+        <div class="card-body">
+          <div class="timeline">
+            {% for entry in logs %}
+            <div class="timeline-item {{ 'is-accent' if loop.index == 1 }}">
+              <p class="text-[11.5px] leading-snug text-ink-soft"><span class="font-semibold text-ink">{{ entry.user.full_name if entry.user else 'Система' }}</span> {{ actionVerb(entry.action) }}</p>
+              <p class="mt-0.5 text-[10.5px] text-ink-dim">{{ entry.details or actionLabel(entry.action) }} · {{ entry.created_at|relative }}</p>
+            </div>
+            {% else %}
+            <p class="text-[11.5px] text-ink-dim">Событий пока нет</p>
+            {% endfor %}
+          </div>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <!-- edit modal -->
+  <div x-show="modalOpen" x-cloak class="modal-backdrop" @click.self="modalOpen = false" @keydown.escape.window="modalOpen = false">
+    <div class="modal-panel max-w-[720px] animate-fade-up" role="dialog" aria-modal="true">
+      <div class="modal-head">
+        <div>
+          <h2 class="text-[15px] font-semibold text-ink">Редактирование сделки</h2>
+          <p class="mt-0.5 text-[11px] text-ink-dim">Изменения сохраняются в журнале аудита</p>
+        </div>
+        <button type="button" class="btn-icon" @click="modalOpen = false" aria-label="Закрыть">{{ icon("x") }}</button>
+      </div>
+      <form @submit.prevent="save()">
+        <div class="modal-body space-y-5">
+          <div class="grid gap-3 sm:grid-cols-[1fr_170px]">
+            <div><label class="label">Название *</label><input class="field" x-model.trim="form.title" required maxlength="255"></div>
+            <div><label class="label">Сумма, ₽</label><input type="number" min="0" step="1" class="field tabular-nums" x-model.number="form.amount"></div>
+          </div>
+          <div class="grid gap-3 sm:grid-cols-3">
+            <div><label class="label">Статус</label><select class="field" x-model="form.status">{% for key, label in status_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></div>
+            <div><label class="label">Приоритет</label><select class="field" x-model="form.priority">{% for key, label in priority_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></div>
+            <div><label class="label">Срок</label><input type="date" class="field" x-model="form.due_date"></div>
+          </div>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label class="label">Компания</label>
+              <select class="field" x-model.number="form.company_id">
+                <option value="">Не выбрана</option>
+                {% for company in companies %}<option value="{{ company.id }}">{{ company.name }}</option>{% endfor %}
+              </select>
+            </div>
+            <div>
+              <label class="label">Контакт</label>
+              <select class="field" x-model.number="form.contact_id">
+                <option value="">Не выбран</option>
+                {% for contact in contacts %}<option value="{{ contact.id }}">{{ contact.full_name }}{% if contact.company %} · {{ contact.company.name }}{% endif %}</option>{% endfor %}
+              </select>
+            </div>
+            <div><label class="label">Клиент</label><input class="field" x-model.trim="form.client_name" placeholder="Имя или название"></div>
+            <div><label class="label">Email</label><input type="email" class="field" x-model.trim="form.client_email"></div>
+            <div><label class="label">Телефон</label><input class="field" x-model.trim="form.client_phone"></div>
+            <div><label class="label">Контактное лицо</label><input class="field" x-model.trim="form.client_contact"></div>
+          </div>
+          <div class="grid gap-3 sm:grid-cols-3">
+            <div><label class="label">Категория</label><select class="field" x-model="form.category">{% for key, label in category_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></div>
+            <div><label class="label">Источник</label><select class="field" x-model="form.source">{% for key, label in source_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></div>
+            <div><label class="label">Ответственный</label><select class="field" x-model.number="form.assigned_to_id"><option value="">Не назначен</option>{% for member in users %}<option value="{{ member.id }}">{{ member.full_name }}</option>{% endfor %}</select></div>
+          </div>
+          <div class="grid gap-3 sm:grid-cols-[1fr_190px]">
+            <div><label class="label">Теги</label><input class="field" x-model.trim="form.tags" placeholder="через запятую"></div>
+            <label class="flex cursor-pointer items-center gap-2 self-end rounded-lg border border-line-strong bg-white px-3 py-2 text-[12px] font-medium text-ink-soft"><input type="checkbox" class="h-3.5 w-3.5 rounded border-line-strong text-accent focus:ring-accent/25" x-model="form.starred"> В избранное</label>
+          </div>
+          <div><label class="label">Описание</label><textarea class="field min-h-[100px] resize-y" x-model="form.description"></textarea></div>
+          <div x-show="form.status === 'cancelled'" x-cloak><label class="label">Причина отказа</label><input class="field" x-model.trim="form.lost_reason" placeholder="Почему сделка не состоялась"></div>
+          <p x-show="error" x-cloak class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] font-medium text-rose-700" x-text="error"></p>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn btn-secondary" @click="modalOpen = false">Отмена</button>
+          <button type="submit" class="btn btn-primary" :disabled="saving" x-text="saving ? 'Сохраняем…' : 'Сохранить'"></button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.taskRow = function (id, done) {
+  return {
+    id: id, done: done, busy: false,
+    async toggle() {
+      if (this.busy) return;
+      this.busy = true;
+      try {
+        await apiJson('/api/tasks/' + this.id, { method: 'PATCH', body: JSON.stringify({ is_done: !this.done }) });
+        this.done = !this.done;
+      } catch (error) { toast(error.message, 'error'); }
+      finally { this.busy = false; }
+    },
+    async remove() {
+      const ok = await confirmAction({ title: 'Удалить задачу?', text: 'Действие нельзя отменить.', confirmText: 'Удалить', danger: true });
+      if (!ok) return;
+      try {
+        await apiJson('/api/tasks/' + this.id, { method: 'DELETE' });
+        const row = this.$el.closest('[data-task]');
+        if (row) row.remove();
+        toast('Задача удалена');
+      } catch (error) { toast(error.message, 'error'); }
+    },
+  };
+};
+
+window.applicationDetail = function () {
+  return {
+    data: JSON.parse(document.getElementById('app-data').textContent),
+    status: '', priority: '', starred: false, summary: '',
+    modalOpen: false, saving: false, error: '', form: {},
+    commentText: '', internal: false, commentSaving: false,
+    taskOpen: false, taskSaving: false,
+    taskForm: { title: '', kind: 'task', due_date: '', user_id: null },
+    aiLoading: false,
+    statusOptions: ['new', 'in_progress', 'done', 'cancelled'],
+    appId: {{ app.id }},
+
+    init() {
+      this.status = this.data.status;
+      this.priority = this.data.priority;
+      this.starred = this.data.starred;
+      this.summary = this.data.ai_summary || '';
+      this.taskForm.user_id = {{ user.id if user else 'null' }};
+      this.resetForm();
+    },
+
+    resetForm() {
+      const d = this.data;
+      this.form = {
+        title: d.title, description: d.description, status: d.status, priority: d.priority,
+        category: d.category, source: d.source, tags: d.tags, due_date: d.due_date,
+        amount: d.amount, lost_reason: d.lost_reason, starred: d.starred,
+        client_name: d.client_name, client_email: d.client_email, client_phone: d.client_phone,
+        client_contact: d.client_contact, company_id: d.company_id || '', contact_id: d.contact_id || '',
+        assigned_to_id: d.assigned_to_id || '',
+      };
+    },
+
+    openEdit() { this.error = ''; this.resetForm(); this.modalOpen = true; },
+
+    async save() {
+      if (!this.form.title.trim()) { this.error = 'Укажите название'; return; }
+      this.saving = true; this.error = '';
+      const payload = Object.assign({}, this.form, {
+        amount: Number(this.form.amount || 0),
+        company_id: this.form.company_id ? Number(this.form.company_id) : null,
+        contact_id: this.form.contact_id ? Number(this.form.contact_id) : null,
+        assigned_to_id: this.form.assigned_to_id ? Number(this.form.assigned_to_id) : null,
+        due_date: this.form.due_date || null,
+      });
+      try {
+        await apiJson('/api/applications/' + this.appId, { method: 'PATCH', body: JSON.stringify(payload) });
+        window.location.href = '/applications/' + this.appId + '?msg=' + encodeURIComponent('Сделка обновлена');
+      } catch (error) { this.error = error.message; }
+      finally { this.saving = false; }
+    },
+
+    async changeStatus(status) {
+      if (status === this.status) return;
+      try {
+        await apiJson('/api/applications/' + this.appId + '/status', { method: 'PATCH', body: JSON.stringify({ status }) });
+        this.status = status;
+        this.data.status = status;
+        toast('Статус: ' + statusLabel(status));
+      } catch (error) { toast(error.message, 'error'); }
+    },
+
+    async toggleStar() {
+      try {
+        const result = await apiJson('/api/applications/' + this.appId + '/star', { method: 'POST' });
+        this.starred = result.starred;
+      } catch (error) { toast(error.message, 'error'); }
+    },
+
+    async analyze() {
+      this.aiLoading = true;
+      try {
+        const result = await apiJson('/api/ai/analyze/' + this.appId, { method: 'POST' });
+        this.summary = result.summary;
+        this.priority = result.priority;
+        this.data.priority = result.priority;
+        toast('AI-анализ готов');
+      } catch (error) { toast(error.message, 'error'); }
+      finally { this.aiLoading = false; }
+    },
+
+    async addComment() {
+      if (!this.commentText.trim()) return;
+      this.commentSaving = true;
+      try {
+        await apiJson('/api/applications/' + this.appId + '/comments', {
+          method: 'POST', body: JSON.stringify({ text: this.commentText, is_internal: this.internal }),
+        });
+        window.location.href = '/applications/' + this.appId + '?msg=' + encodeURIComponent('Комментарий добавлен');
+      } catch (error) { toast(error.message, 'error'); }
+      finally { this.commentSaving = false; }
+    },
+
+    async deleteComment(id) {
+      const ok = await confirmAction({ title: 'Удалить комментарий?', text: 'Сообщение будет удалено из обсуждения.', confirmText: 'Удалить', danger: true });
+      if (!ok) return;
+      try {
+        await apiJson('/api/applications/comments/' + id, { method: 'DELETE' });
+        window.location.href = '/applications/' + this.appId + '?msg=' + encodeURIComponent('Комментарий удалён');
+      } catch (error) { toast(error.message, 'error'); }
+    },
+
+    async addTask() {
+      if (!this.taskForm.title.trim()) return;
+      this.taskSaving = true;
+      try {
+        await apiJson('/api/tasks', {
+          method: 'POST',
+          body: JSON.stringify({
+            title: this.taskForm.title, kind: this.taskForm.kind,
+            due_date: this.taskForm.due_date || null, app_id: this.appId,
+            user_id: this.taskForm.user_id ? Number(this.taskForm.user_id) : null,
+          }),
+        });
+        window.location.href = '/applications/' + this.appId + '?msg=' + encodeURIComponent('Задача добавлена');
+      } catch (error) { toast(error.message, 'error'); }
+      finally { this.taskSaving = false; }
+    },
+
+    async remove() {
+      const ok = await confirmAction({
+        title: 'Удалить сделку?', text: '«' + this.data.title + '» и связанные данные будут удалены безвозвратно.',
+        confirmText: 'Удалить', danger: true,
+      });
+      if (!ok) return;
+      try {
+        await apiJson('/api/applications/' + this.appId, { method: 'DELETE' });
+        window.location.href = '/applications?msg=' + encodeURIComponent('Сделка удалена');
+      } catch (error) { toast(error.message, 'error'); }
+    },
+  };
+};
+</script>
+{% endblock %}

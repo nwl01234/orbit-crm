@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, avatar, empty_state %}
+{% block title %}Задачи — {{ app_name }}{% endblock %}
+
+{% block topbar_actions %}
+<button type="button" class="btn btn-primary btn-sm hidden sm:inline-flex" onclick="window.dispatchEvent(new CustomEvent('new-task'))">{{ icon("plus", "icon-sm") }} Задача</button>
+{% endblock %}
+
+{% block content %}
+<div x-data="tasksPage()" x-init="load()">
+  <div class="page-head">
+    <div>
+      <p class="eyebrow">Next actions</p>
+      <h1 class="page-title">Задачи</h1>
+      <p class="page-sub">Звонки, встречи, письма и следующие шаги. Просроченные подсвечиваются автоматически.</p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <button type="button" class="btn btn-secondary" @click="load()" :disabled="loading">{{ icon("refresh", "icon-sm") }} Обновить</button>
+      <button type="button" class="btn btn-primary" @click="openCreate()">{{ icon("plus", "icon-sm") }} Новая задача</button>
+    </div>
+  </div>
+
+  <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="kpi kpi-accent"><p class="kpi-label">{{ icon("check-square", "icon-sm") }} Мои открытые</p><p class="kpi-value" x-text="mineOpen"></p><p class="kpi-note">назначены на вас</p></div>
+    <div class="kpi"><p class="kpi-label">{{ icon("clock", "icon-sm") }} Просрочено</p><p class="kpi-value" :class="overdueCount ? 'text-rose-700' : ''" x-text="overdueCount"></p><p class="kpi-note">требуют немедленного внимания</p></div>
+    <div class="kpi"><p class="kpi-label">{{ icon("users", "icon-sm") }} В команде</p><p class="kpi-value" x-text="openCount"></p><p class="kpi-note">всего открытых задач</p></div>
+    <div class="kpi"><p class="kpi-label">{{ icon("check", "icon-sm") }} Завершено</p><p class="kpi-value" x-text="doneCount"></p><p class="kpi-note">за всё время</p></div>
+  </div>
+
+  <section class="card mt-4">
+    <div class="flex flex-wrap items-center gap-2 border-b border-line p-3">
+      <div class="flex rounded-lg border border-line bg-zinc-50 p-0.5">
+        <button type="button" class="rounded-md px-3 py-1.5 text-[11.5px] font-semibold transition" :class="mine ? 'bg-white text-ink shadow-sm' : 'text-ink-dim hover:text-ink'" @click="mine = true">Мои</button>
+        <button type="button" class="rounded-md px-3 py-1.5 text-[11.5px] font-semibold transition" :class="!mine ? 'bg-white text-ink shadow-sm' : 'text-ink-dim hover:text-ink'" @click="mine = false">Вся команда</button>
+      </div>
+      <div class="flex rounded-lg border border-line bg-zinc-50 p-0.5">
+        <button type="button" class="rounded-md px-3 py-1.5 text-[11.5px] font-semibold transition" :class="view === 'open' ? 'bg-white text-ink shadow-sm' : 'text-ink-dim hover:text-ink'" @click="view = 'open'">Открытые</button>
+        <button type="button" class="rounded-md px-3 py-1.5 text-[11.5px] font-semibold transition" :class="view === 'done' ? 'bg-white text-ink shadow-sm' : 'text-ink-dim hover:text-ink'" @click="view = 'done'">Выполненные</button>
+        <button type="button" class="rounded-md px-3 py-1.5 text-[11.5px] font-semibold transition" :class="view === 'all' ? 'bg-white text-ink shadow-sm' : 'text-ink-dim hover:text-ink'" @click="view = 'all'">Все</button>
+      </div>
+      <select class="field field-sm w-auto" x-model="kind" aria-label="Тип задачи">
+        <option value="">Все типы</option>
+        {% for key, label in task_kind_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+      </select>
+      <label class="flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-line-strong bg-white px-3 text-[11.5px] font-medium text-ink-soft">
+        <input type="checkbox" class="h-3.5 w-3.5 rounded border-line-strong text-accent focus:ring-accent/25" x-model="onlyOverdue"> Просроченные
+      </label>
+      <div class="search-box ml-auto min-w-[200px]">
+        {{ icon("search", "icon-sm") }}
+        <input type="search" x-model="q" placeholder="Поиск задач…" aria-label="Поиск задач">
+      </div>
+    </div>
+
+    <div x-show="loading" x-cloak class="p-4">
+      <div class="space-y-2"><div class="skeleton h-10"></div><div class="skeleton h-10"></div><div class="skeleton h-10"></div></div>
+    </div>
+
+    <div x-show="!loading" x-cloak>
+      <template x-if="view !== 'done'">
+        <div>
+          <template x-for="group in groups" :key="group.key">
+            <div x-show="group.items.length">
+              <div class="flex items-center gap-2 border-b border-line bg-zinc-50/70 px-4 py-2">
+                <span class="h-1.5 w-1.5 rounded-full" :class="group.dot"></span>
+                <p class="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-dim" x-text="group.label"></p>
+                <span class="text-[10px] text-ink-dim" x-text="group.items.length"></span>
+              </div>
+              <template x-for="task in group.items" :key="task.id">
+                <div class="flex items-start gap-3 border-b border-line/70 px-4 py-3 last:border-0 hover:bg-zinc-50/50">
+                  <button type="button" class="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md border transition" :class="task.is_done ? 'border-accent bg-accent text-white' : 'border-line-strong bg-white text-transparent hover:border-accent/50'" @click="toggle(task)" :aria-pressed="task.is_done">
+                    <svg class="icon" style="height:12px;width:12px"><use href="#i-check"></use></svg>
+                  </button>
+                  <span class="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-line bg-white text-ink-muted"><svg class="icon icon-sm"><use :href="'#i-' + kindIcon(task.kind)"></use></svg></span>
+                  <div class="min-w-0 flex-1">
+                    <p class="text-[12.5px] font-medium leading-snug" :class="task.is_done ? 'text-ink-dim line-through' : 'text-ink'" x-text="task.title"></p>
+                    <div class="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10.5px] text-ink-dim">
+                      <span x-text="taskKindLabel(task.kind)"></span>
+                      <template x-if="task.application_title"><span>·</span><a x-show="task.app_id" :href="'/applications/' + task.app_id" class="hover:text-accent" x-text="task.application_title"></a></template>
+                      <span>·</span>
+                      <span class="flex items-center gap-1"><span class="avatar avatar-sm h-4 w-4 text-[7px]" x-text="initials(task.user_name || '?')"></span><span x-text="task.user_name || '—'"></span></span>
+                    </div>
+                  </div>
+                  <span class="shrink-0 whitespace-nowrap text-[10.5px]" :class="isTaskOverdue(task) ? 'overdue' : 'text-ink-dim'" x-text="task.due_date ? dueLabel(task.due_date) : 'без срока'"></span>
+                  <button type="button" class="btn-icon-sm shrink-0 text-ink-dim hover:text-rose-600" @click="remove(task)" aria-label="Удалить задачу"><svg class="icon icon-sm"><use href="#i-trash"></use></svg></button>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </template>
+
+      <template x-if="view === 'done'">
+        <div class="divide-y divide-line/70">
+          <template x-for="task in filtered" :key="task.id">
+            <div class="flex items-start gap-3 px-4 py-3 hover:bg-zinc-50/50">
+              <span class="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md border border-accent bg-accent text-white"><svg class="icon" style="height:12px;width:12px"><use href="#i-check"></use></svg></span>
+              <div class="min-w-0 flex-1"><p class="text-[12.5px] font-medium text-ink-dim line-through" x-text="task.title"></p><p class="mt-0.5 text-[10.5px] text-ink-dim" x-text="taskKindLabel(task.kind) + ' · ' + (task.user_name || '—')"></p></div>
+              <button type="button" class="btn-icon-sm shrink-0 text-ink-dim hover:text-rose-600" @click="remove(task)" aria-label="Удалить задачу"><svg class="icon icon-sm"><use href="#i-trash"></use></svg></button>
+            </div>
+          </template>
+        </div>
+      </template>
+
+      <div x-show="!filtered.length" class="empty-state">
+        <span class="empty-icon"><svg class="icon"><use href="#i-check-square"></use></svg></span>
+        <p class="text-[13px] font-semibold text-ink">Задач нет</p>
+        <p class="mt-1 max-w-sm text-[12px] leading-relaxed text-ink-muted">Создайте задачу или измените фильтры. Задачи можно привязать к сделке.</p>
+        <button type="button" class="btn btn-primary btn-sm mt-3" @click="openCreate()">Новая задача</button>
+      </div>
+    </div>
+  </section>
+
+  <div x-show="modalOpen" x-cloak class="modal-backdrop" @click.self="modalOpen = false" @keydown.escape.window="modalOpen = false">
+    <div class="modal-panel max-w-[520px] animate-fade-up">
+      <div class="modal-head">
+        <div><h2 class="text-[15px] font-semibold text-ink">Новая задача</h2><p class="mt-0.5 text-[11px] text-ink-dim">Поставьте следующий шаг по сделке</p></div>
+        <button type="button" class="btn-icon" @click="modalOpen = false" aria-label="Закрыть">{{ icon("x") }}</button>
+      </div>
+      <form @submit.prevent="create()">
+        <div class="modal-body space-y-4">
+          <div><label class="label">Что нужно сделать? *</label><input class="field" x-model.trim="form.title" required maxlength="255" placeholder="Позвонить и согласовать смету"></div>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div><label class="label">Тип</label><select class="field" x-model="form.kind">{% for key, label in task_kind_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></div>
+            <div><label class="label">Срок</label><input type="date" class="field" x-model="form.due_date"></div>
+            <div><label class="label">Сделка</label><select class="field" x-model.number="form.app_id"><option value="">Без сделки</option>{% for item in applications %}<option value="{{ item.id }}">#{{ item.id }} · {{ item.title }}</option>{% endfor %}</select></div>
+            <div><label class="label">Исполнитель</label><select class="field" x-model.number="form.user_id">{% for member in team %}<option value="{{ member.id }}">{{ member.full_name }}</option>{% endfor %}</select></div>
+          </div>
+          <p x-show="error" x-cloak class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] font-medium text-rose-700" x-text="error"></p>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn btn-secondary" @click="modalOpen = false">Отмена</button>
+          <button type="submit" class="btn btn-primary" :disabled="saving" x-text="saving ? 'Создаём…' : 'Создать задачу'"></button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.tasksPage = function () {
+  return {
+    tasks: [], loading: true, mine: true, view: 'open', kind: '', q: '', onlyOverdue: false,
+    modalOpen: false, saving: false, error: '', currentUserId: {{ user.id if user else 'null' }},
+    form: { title: '', kind: 'task', due_date: '', app_id: '', user_id: null },
+
+    init() {
+      window.addEventListener('new-task', () => this.openCreate());
+      this.form.user_id = this.currentUserId;
+      this.load();
+    },
+
+    async load() {
+      this.loading = true;
+      try {
+        this.tasks = await apiJson('/api/tasks?limit=500');
+      } catch (error) { toast(error.message, 'error'); }
+      finally { this.loading = false; }
+    },
+
+    get filtered() {
+      const today = todayIso();
+      return this.tasks.filter((task) => {
+        if (this.mine && task.user_id !== this.currentUserId) return false;
+        if (this.view === 'open' && task.is_done) return false;
+        if (this.view === 'done' && !task.is_done) return false;
+        if (this.kind && task.kind !== this.kind) return false;
+        if (this.onlyOverdue && !(task.due_date && task.due_date < today && !task.is_done)) return false;
+        if (this.q.trim()) {
+          const needle = this.q.trim().toLowerCase();
+          const haystack = [task.title, task.application_title, task.user_name].join(' ').toLowerCase();
+          if (!haystack.includes(needle)) return false;
+        }
+        return true;
+      });
+    },
+
+    get groups() {
+      const today = todayIso();
+      const tomorrowDate = new Date();
+      tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+      const tomorrow = [
+        tomorrowDate.getFullYear(),
+        String(tomorrowDate.getMonth() + 1).padStart(2, '0'),
+        String(tomorrowDate.getDate()).padStart(2, '0'),
+      ].join('-');
+      const groups = [
+        { key: 'overdue', label: 'Просрочено', dot: 'bg-rose-500', items: [] },
+        { key: 'today', label: 'Сегодня', dot: 'bg-amber-500', items: [] },
+        { key: 'tomorrow', label: 'Завтра', dot: 'bg-blue-500', items: [] },
+        { key: 'later', label: 'Позже', dot: 'bg-accent', items: [] },
+        { key: 'none', label: 'Без срока', dot: 'bg-zinc-300', items: [] },
+        { key: 'done', label: 'Выполненные', dot: 'bg-emerald-500', items: [] },
+      ];
+      const map = Object.fromEntries(groups.map((group) => [group.key, group]));
+      this.filtered.forEach((task) => {
+        if (task.is_done) map.done.items.push(task);
+        else if (!task.due_date) map.none.items.push(task);
+        else if (task.due_date < today) map.overdue.items.push(task);
+        else if (task.due_date === today) map.today.items.push(task);
+        else if (task.due_date === tomorrow) map.tomorrow.items.push(task);
+        else map.later.items.push(task);
+      });
+      return groups;
+    },
+
+    get mineOpen() { return this.tasks.filter((t) => !t.is_done && t.user_id === this.currentUserId).length; },
+    get openCount() { return this.tasks.filter((t) => !t.is_done).length; },
+    get doneCount() { return this.tasks.filter((t) => t.is_done).length; },
+    get overdueCount() {
+      const today = todayIso();
+      return this.tasks.filter((t) => !t.is_done && t.due_date && t.due_date < today).length;
+    },
+
+    kindIcon(kind) { return { task: 'check-square', call: 'phone', meeting: 'calendar', email: 'mail' }[kind] || 'check-square'; },
+    isTaskOverdue(task) { return !task.is_done && task.due_date && task.due_date < todayIso(); },
+
+    async toggle(task) {
+      const next = !task.is_done;
+      try {
+        await apiJson('/api/tasks/' + task.id, { method: 'PATCH', body: JSON.stringify({ is_done: next }) });
+        task.is_done = next;
+        if (next) toast('Задача выполнена');
+      } catch (error) { toast(error.message, 'error'); }
+    },
+
+    openCreate() {
+      this.error = '';
+      const params = new URLSearchParams(window.location.search);
+      this.form = { title: '', kind: 'task', due_date: '', app_id: params.get('app_id') ? Number(params.get('app_id')) : '', user_id: this.currentUserId };
+      this.modalOpen = true;
+    },
+
+    async create() {
+      if (!this.form.title.trim()) { this.error = 'Укажите название задачи'; return; }
+      this.saving = true; this.error = '';
+      try {
+        const task = await apiJson('/api/tasks', {
+          method: 'POST',
+          body: JSON.stringify({
+            title: this.form.title, kind: this.form.kind, due_date: this.form.due_date || null,
+            app_id: this.form.app_id ? Number(this.form.app_id) : null,
+            user_id: this.form.user_id ? Number(this.form.user_id) : null,
+          }),
+        });
+        this.tasks.unshift(task);
+        this.modalOpen = false;
+        toast('Задача создана');
+      } catch (error) { this.error = error.message; }
+      finally { this.saving = false; }
+    },
+
+    async remove(task) {
+      const ok = await confirmAction({ title: 'Удалить задачу?', text: '«' + task.title + '» будет удалена.', confirmText: 'Удалить', danger: true });
+      if (!ok) return;
+      try {
+        await apiJson('/api/tasks/' + task.id, { method: 'DELETE' });
+        this.tasks = this.tasks.filter((entry) => entry.id !== task.id);
+        toast('Задача удалена');
+      } catch (error) { toast(error.message, 'error'); }
+    },
+  };
+};
+</script>
+{% endblock %}

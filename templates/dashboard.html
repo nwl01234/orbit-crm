@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, avatar, status_badge, priority_badge, empty_state %}
+{% block title %}Обзор — {{ app_name }}{% endblock %}
+
+{% block topbar_actions %}
+<a href="/applications?new=1" class="btn btn-primary btn-sm hidden sm:inline-flex">{{ icon("plus", "icon-sm") }} Сделка</a>
+{% endblock %}
+
+{% block content %}
+{% set open_count = stats.by_status.new + stats.by_status.in_progress %}
+{% set trend_max = [stats.trend|map(attribute='created')|max, stats.trend|map(attribute='closed')|max, 1]|max %}
+{% set first_name = user.full_name.split()[0] if user and user.full_name else 'коллега' %}
+
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Операционный обзор · {{ today_iso() }}</p>
+    <h1 class="page-title">Добрый день, {{ first_name }}</h1>
+    <p class="page-sub">Ключевые показатели воронки, загрузка команды и всё, что требует внимания сегодня.</p>
+  </div>
+  <div class="flex flex-wrap items-center gap-2">
+    <a href="/reports" class="btn btn-secondary">{{ icon("chart", "icon-sm") }} Отчёт</a>
+    <a href="/applications?new=1" class="btn btn-primary">{{ icon("plus", "icon-sm") }} Новая сделка</a>
+  </div>
+</div>
+
+<div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+  <div class="kpi kpi-accent">
+    <div class="kpi-label">{{ icon("wallet", "icon-sm") }} Воронка</div>
+    <p class="kpi-value">{{ stats.pipeline_amount|money }}</p>
+    <p class="kpi-note"><span class="font-semibold text-accent-ink">{{ open_count }}</span> {{ open_count|plural('открытая сделка', 'открытые сделки', 'открытых сделок') }} · средний чек {{ stats.avg_deal_amount|money }}</p>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">{{ icon("target", "icon-sm") }} Закрыто успешно</div>
+    <p class="kpi-value">{{ stats.won_amount|money }}</p>
+    <p class="kpi-note"><span class="font-semibold text-emerald-700">{{ stats.by_status.done }}</span> {{ stats.by_status.done|plural('сделка', 'сделки', 'сделок') }} · конверсия {{ ((stats.by_status.done / stats.total * 100) if stats.total else 0)|round|int }}%</p>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">{{ icon("check-square", "icon-sm") }} Мои задачи</div>
+    <p class="kpi-value">{{ stats.my_open_tasks }}</p>
+    <p class="kpi-note">всего открытых в команде — {{ stats.open_tasks }}</p>
+  </div>
+  <div class="kpi {{ 'border-rose-200 bg-rose-50/40' if stats.overdue else '' }}">
+    <div class="kpi-label {{ 'text-rose-600' if stats.overdue }}">{{ icon("alert", "icon-sm") }} Просрочено</div>
+    <p class="kpi-value {{ 'text-rose-700' if stats.overdue }}">{{ stats.overdue }}</p>
+    <p class="kpi-note">сделок с истёкшим сроком · без ответственного {{ stats.unassigned }}</p>
+  </div>
+</div>
+
+<div class="mt-4 grid gap-4 xl:grid-cols-[1.6fr_1fr]">
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="card-title">Динамика за 14 дней</h2>
+        <p class="card-hint">Созданные и закрытые сделки по дням</p>
+      </div>
+      <div class="flex items-center gap-4 text-[10.5px] font-medium text-ink-dim">
+        <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-sm bg-accent"></span> Создано</span>
+        <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-sm bg-zinc-300"></span> Закрыто</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="flex h-[190px] items-end gap-2 sm:gap-3">
+        {% for point in stats.trend %}
+        <div class="group flex h-full flex-1 flex-col justify-end gap-1">
+          <div class="relative flex h-full items-end justify-center gap-[3px]">
+            <div class="chart-bar w-full max-w-[12px] bg-accent/85 group-hover:bg-accent" style="height: {{ ((point.created / trend_max) * 100)|round(1) }}%" title="{{ point.date }} · создано {{ point.created }}"></div>
+            <div class="chart-bar w-full max-w-[12px] bg-zinc-300 group-hover:bg-zinc-400" style="height: {{ ((point.closed / trend_max) * 100)|round(1) }}%" title="{{ point.date }} · закрыто {{ point.closed }}"></div>
+          </div>
+          <span class="text-center text-[9px] tabular-nums text-ink-dim">{{ point.date[8:10] }}.{{ point.date[5:7] }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="mt-4 grid grid-cols-2 gap-3 border-t border-line pt-4 sm:grid-cols-4">
+        <div><p class="text-[10px] uppercase tracking-[0.1em] text-ink-dim">За 7 дней</p><p class="mt-1 font-display text-[18px] font-semibold text-ink">+{{ stats.last_7_days }}</p></div>
+        <div><p class="text-[10px] uppercase tracking-[0.1em] text-ink-dim">За 30 дней</p><p class="mt-1 font-display text-[18px] font-semibold text-ink">+{{ stats.last_30_days }}</p></div>
+        <div><p class="text-[10px] uppercase tracking-[0.1em] text-ink-dim">Компании</p><p class="mt-1 font-display text-[18px] font-semibold text-ink">{{ stats.companies }}</p></div>
+        <div><p class="text-[10px] uppercase tracking-[0.1em] text-ink-dim">Контакты</p><p class="mt-1 font-display text-[18px] font-semibold text-ink">{{ stats.contacts }}</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="card-title">Воронка по статусам</h2>
+        <p class="card-hint">Распределение {{ stats.total }} {{ stats.total|plural('сделки', 'сделок', 'сделок') }}</p>
+      </div>
+      <a href="/kanban" class="btn btn-ghost btn-sm">{{ icon("columns", "icon-sm") }} Канбан</a>
+    </div>
+    <div class="card-body space-y-4">
+      {% set status_meta = [
+        ('new', 'Новые', 'bg-blue-500'),
+        ('in_progress', 'В работе', 'bg-amber-500'),
+        ('done', 'Выполнены', 'bg-emerald-500'),
+        ('cancelled', 'Отменены', 'bg-zinc-400')
+      ] %}
+      {% for key, label, color in status_meta %}
+      {% set value = stats.by_status[key] %}
+      <div>
+        <div class="mb-1.5 flex items-center justify-between text-[11.5px]">
+          <span class="flex items-center gap-2 font-medium text-ink-soft"><span class="h-1.5 w-1.5 rounded-full {{ color }}"></span>{{ label }}</span>
+          <span class="tabular-nums text-ink-dim">{{ value }} · {{ ((value / stats.total * 100) if stats.total else 0)|round|int }}%</span>
+        </div>
+        <div class="metric-bar"><span class="{{ color }}" style="width: {{ ((value / stats.total * 100) if stats.total else 0)|round(1) }}%"></span></div>
+      </div>
+      {% endfor %}
+      <div class="rounded-xl border border-line bg-zinc-50/70 p-3.5">
+        <p class="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-dim">Топ клиентов</p>
+        {% if stats.top_clients %}
+        <div class="mt-2 space-y-1.5">
+          {% for client in stats.top_clients[:4] %}
+          <div class="flex items-center justify-between gap-2 text-[11.5px]">
+            <a class="truncate font-medium text-ink-soft hover:text-accent" href="/applications?client={{ client.name|urlencode }}">{{ client.name }}</a>
+            <span class="shrink-0 tabular-nums text-ink-dim">{{ client.count }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="mt-1.5 text-[11.5px] text-ink-dim">Пока нет данных</p>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="mt-4 grid gap-4 xl:grid-cols-[1.6fr_1fr]">
+  <section class="card overflow-hidden">
+    <div class="card-header">
+      <div>
+        <h2 class="card-title">Последние сделки</h2>
+        <p class="card-hint">Обновления за последние дни</p>
+      </div>
+      <a href="/applications" class="btn btn-secondary btn-sm">Все сделки {{ icon("arrow-right", "icon-sm") }}</a>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Сделка</th><th>Клиент</th><th>Статус</th><th class="text-right">Сумма</th><th>Ответственный</th></tr></thead>
+        <tbody>
+          {% for item in recent %}
+          <tr>
+            <td class="max-w-[260px]">
+              <a class="flex items-center gap-2" href="/applications/{{ item.id }}">
+                <span class="text-[10px] font-semibold tabular-nums text-ink-dim">#{{ item.id }}</span>
+                <span class="truncate font-medium text-ink hover:text-accent">{{ item.title }}</span>
+                {% if item.starred %}<svg class="icon icon-sm shrink-0 text-amber-500"><use href="#i-star"></use></svg>{% endif %}
+              </a>
+            </td>
+            <td class="max-w-[180px]"><span class="block truncate text-ink-muted">{{ item.client_name or '—' }}</span></td>
+            <td>{{ status_badge(item.status) }}</td>
+            <td class="text-right font-medium tabular-nums text-ink-soft">{{ item.amount|money }}</td>
+            <td>
+              {% if item.assigned_to %}
+              <span class="flex items-center gap-2"><span class="avatar avatar-sm">{{ item.assigned_to.initials }}</span><span class="truncate text-[11.5px] text-ink-soft">{{ item.assigned_to.full_name }}</span></span>
+              {% else %}<span class="text-[11.5px] text-ink-dim">Не назначен</span>{% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5">{{ empty_state("Сделок пока нет", "Создайте первую сделку, чтобы увидеть динамику.", "inbox") }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="space-y-4">
+    <section class="card">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">Требует внимания</h2>
+          <p class="card-hint">Просроченные сроки</p>
+        </div>
+        <span class="chip {{ 'priority-urgent' if overdue else 'chip-neutral' }}">{{ overdue|length }}</span>
+      </div>
+      <div class="divide-y divide-line/80">
+        {% for item in overdue %}
+        <a href="/applications/{{ item.id }}" class="flex items-start gap-3 px-5 py-3 hover:bg-zinc-50">
+          <span class="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-rose-50 text-rose-600">{{ icon("clock", "icon-sm") }}</span>
+          <span class="min-w-0 flex-1">
+            <span class="block truncate text-[12px] font-medium text-ink">{{ item.title }}</span>
+            <span class="mt-0.5 block text-[10.5px] text-ink-dim">{{ item.client_name or 'Без клиента' }} · срок {{ item.due_date|day_label }}</span>
+          </span>
+          <span class="shrink-0 text-[11px] font-semibold text-rose-600">{{ item.amount|money }}</span>
+        </a>
+        {% else %}
+        <div class="px-5 py-8 text-center"><p class="text-[12px] font-medium text-ink-muted">Просрочек нет</p><p class="mt-1 text-[11px] text-ink-dim">Все сроки под контролем</p></div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">Мои задачи</h2>
+          <p class="card-hint">Ближайшие действия</p>
+        </div>
+        <a href="/tasks" class="btn btn-ghost btn-sm">Все {{ icon("arrow-right", "icon-sm") }}</a>
+      </div>
+      <div class="divide-y divide-line/80">
+        {% for task in my_tasks %}
+        <div class="flex items-start gap-3 px-5 py-3">
+          <span class="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-line bg-zinc-50 text-ink-muted">{{ icon(taskKindIcon(task.kind), "icon-sm") }}</span>
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-[12px] font-medium text-ink">{{ task.title }}</p>
+            <p class="mt-0.5 text-[10.5px] {{ 'text-rose-600 font-semibold' if is_overdue(task.due_date, 'new') else 'text-ink-dim' }}">{{ task.due_date|day_label if task.due_date else 'Без срока' }} · {{ taskKindLabel(task.kind) }}</p>
+          </div>
+        </div>
+        {% else %}
+        <div class="px-5 py-8 text-center"><p class="text-[12px] font-medium text-ink-muted">Задач нет</p><p class="mt-1 text-[11px] text-ink-dim">Отличный момент для новых сделок</p></div>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+</div>
+
+<div class="mt-4 grid gap-4 xl:grid-cols-[1fr_1fr]">
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="card-title">Загрузка команды</h2>
+        <p class="card-hint">Открытые сделки на сотрудника</p>
+      </div>
+      <a href="/users" class="btn btn-ghost btn-sm">Команда</a>
+    </div>
+    <div class="card-body space-y-3.5">
+      {% set workload_max = [stats.workload|map(attribute='open')|max, 1]|max %}
+      {% for member in stats.workload %}
+      <div class="flex items-center gap-3">
+        {{ avatar(member.name, 'avatar-sm') }}
+        <div class="min-w-0 flex-1">
+          <div class="flex items-baseline justify-between gap-2">
+            <p class="truncate text-[11.5px] font-medium text-ink">{{ member.name }}</p>
+            <span class="shrink-0 text-[10.5px] tabular-nums text-ink-dim">{{ member.open }}</span>
+          </div>
+          <div class="metric-bar mt-1.5"><span style="width: {{ (member.open / workload_max * 100)|round(1) }}%"></span></div>
+        </div>
+      </div>
+      {% else %}
+      {{ empty_state("Нет назначенных сделок", "Назначьте ответственных, чтобы видеть загрузку.", "users") }}
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="card-title">Лента активности</h2>
+        <p class="card-hint">Что происходило в системе</p>
+      </div>
+      <a href="/logs" class="btn btn-ghost btn-sm">Журнал</a>
+    </div>
+    <div class="card-body">
+      <div class="timeline">
+        {% for entry in activity %}
+        <div class="timeline-item {{ 'is-accent' if loop.index == 1 }}">
+          <p class="text-[11.5px] leading-snug text-ink-soft">
+            <span class="font-semibold text-ink">{{ entry.user.full_name if entry.user else 'Система' }}</span>
+            {{ actionVerb(entry.action) }}
+            {% if entry.entity_type == 'application' and entry.entity_id %}<a class="link" href="/applications/{{ entry.entity_id }}">#{{ entry.entity_id }}</a>{% endif %}
+          </p>
+          <p class="mt-0.5 truncate text-[10.5px] text-ink-dim">{{ entry.details or actionLabel(entry.action) }} · {{ entry.created_at|relative }}</p>
+        </div>
+        {% else %}
+        <p class="text-[12px] text-ink-dim">Активности пока нет</p>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}

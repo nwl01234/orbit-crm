@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, avatar, status_badge, priority_badge, empty_state %}
+{% block title %}{{ contact.full_name }} — {{ app_name }}{% endblock %}
+
+{% block topbar_actions %}
+<a href="/contacts" class="btn btn-secondary btn-sm hidden sm:inline-flex">{{ icon("chevron-left", "icon-sm") }} Контакты</a>
+{% endblock %}
+
+{% block content %}
+<div x-data="contactDetail()" x-init="init()">
+  <nav class="mb-4 flex items-center gap-1.5 text-[11px] text-ink-dim">
+    <a href="/" class="hover:text-ink">Обзор</a><span>/</span>
+    <a href="/contacts" class="hover:text-ink">Контакты</a><span>/</span>
+    <span class="truncate font-medium text-ink-muted">{{ contact.full_name }}</span>
+  </nav>
+
+  <div class="page-head">
+    <div class="flex min-w-0 items-start gap-4">
+      <span class="avatar avatar-lg h-14 w-14 text-[15px]">{{ contact.full_name|initials }}</span>
+      <div class="min-w-0">
+        <div class="mb-1.5 flex flex-wrap items-center gap-2">
+          {% if contact.is_primary %}<span class="chip chip-accent">Основной контакт</span>{% endif %}
+          {% if contact.owner %}<span class="chip chip-neutral">{{ contact.owner.full_name }}</span>{% endif %}
+        </div>
+        <h1 class="page-title truncate">{{ contact.full_name }}</h1>
+        <p class="page-sub">
+          {{ contact.position or 'Контактное лицо' }}{% if contact.company %} · <a class="link" href="/companies/{{ contact.company.id }}">{{ contact.company.name }}</a>{% endif %}
+        </p>
+      </div>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <a href="/applications?new=1&client={{ contact.full_name|urlencode }}&contact_id={{ contact.id }}{% if contact.company %}&company_id={{ contact.company.id }}{% endif %}" class="btn btn-primary">{{ icon("plus", "icon-sm") }} Сделка</a>
+      {% if contact.email %}<a href="mailto:{{ contact.email }}" class="btn btn-secondary">{{ icon("mail", "icon-sm") }} Написать</a>{% endif %}
+      <button type="button" class="btn btn-secondary" @click="openEdit()">{{ icon("edit", "icon-sm") }} Изменить</button>
+      <button type="button" class="btn btn-ghost text-rose-600 hover:bg-rose-50" @click="remove()" aria-label="Удалить контакт">{{ icon("trash", "icon-sm") }}</button>
+    </div>
+  </div>
+
+  <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="kpi"><p class="kpi-label">{{ icon("briefcase", "icon-sm") }} Всего сделок</p><p class="kpi-value">{{ meta.deals_count }}</p><p class="kpi-note">включая закрытые</p></div>
+    <div class="kpi kpi-accent"><p class="kpi-label">{{ icon("columns", "icon-sm") }} В работе</p><p class="kpi-value">{{ meta.open_deals_count }}</p><p class="kpi-note">активные сделки</p></div>
+    <div class="kpi"><p class="kpi-label">{{ icon("clock", "icon-sm") }} Последняя сделка</p><p class="mt-3 font-display text-[18px] font-semibold text-ink">{{ meta.last_deal_at|dt('%d.%m.%Y') if meta.last_deal_at else '—' }}</p><p class="kpi-note">дата создания последней</p></div>
+    <div class="kpi"><p class="kpi-label">{{ icon("building", "icon-sm") }} Компания</p><p class="mt-3 truncate font-display text-[16px] font-semibold text-ink">{{ contact.company.name if contact.company else 'Не привязан' }}</p><p class="kpi-note">{{ contact.company.industry if contact.company and contact.company.industry else 'частное лицо' }}</p></div>
+  </div>
+
+  <div class="mt-4 grid gap-4 xl:grid-cols-[1.55fr_1fr]">
+    <div class="space-y-4">
+      <section class="card overflow-hidden">
+        <div class="card-header">
+          <div><h2 class="card-title">Сделки контакта</h2><p class="card-hint">История взаимодействий</p></div>
+          <a href="/applications?contact_id={{ contact.id }}" class="btn btn-secondary btn-sm">Все {{ icon("arrow-right", "icon-sm") }}</a>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Сделка</th><th>Статус</th><th>Приоритет</th><th class="text-right">Сумма</th><th>Срок</th><th>Ответственный</th></tr></thead>
+            <tbody>
+              {% for deal in deals %}
+              <tr class="{{ 'row-muted' if deal.status == 'cancelled' }}">
+                <td class="max-w-[300px]"><a href="/applications/{{ deal.id }}" class="block truncate font-medium text-ink hover:text-accent">{{ deal.title }}</a><span class="text-[10px] text-ink-dim">#{{ deal.id }} · {{ deal.created_at|dt('%d.%m.%Y') }}</span></td>
+                <td>{{ status_badge(deal.status) }}</td>
+                <td>{{ priority_badge(deal.priority) }}</td>
+                <td class="text-right font-medium tabular-nums text-ink-soft">{{ deal.amount|money }}</td>
+                <td class="whitespace-nowrap text-[11px] {{ 'overdue' if is_overdue(deal.due_date, deal.status) else 'text-ink-muted' }}">{{ deal.due_date|day_label if deal.due_date else '—' }}</td>
+                <td>{% if deal.assigned_to %}<span class="max-w-[110px] truncate text-[11px] text-ink-soft">{{ deal.assigned_to.full_name }}</span>{% else %}<span class="text-[11px] text-ink-dim">—</span>{% endif %}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="6">{{ empty_state("Сделок пока нет", "Создайте сделку и привяжите её к этому контакту.", "briefcase") }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {% if contact.notes %}
+      <section class="card">
+        <div class="card-header"><h2 class="card-title">Заметки</h2><button type="button" class="btn btn-ghost btn-sm" @click="openEdit()">Изменить</button></div>
+        <div class="card-body"><p class="whitespace-pre-line text-[13px] leading-relaxed text-ink-soft">{{ contact.notes }}</p></div>
+      </section>
+      {% endif %}
+    </div>
+
+    <aside class="space-y-4">
+      <section class="card">
+        <div class="card-header"><h2 class="card-title">Связаться</h2></div>
+        <div class="card-body">
+          <dl class="space-y-3 text-[11.5px]">
+            {% if contact.email %}<div class="flex items-start gap-2"><span class="mt-0.5 text-ink-dim">{{ icon("mail", "icon-sm") }}</span><a class="break-all text-ink-soft hover:text-accent" href="mailto:{{ contact.email }}">{{ contact.email }}</a></div>{% endif %}
+            {% if contact.phone %}<div class="flex items-start gap-2"><span class="mt-0.5 text-ink-dim">{{ icon("phone", "icon-sm") }}</span><a class="text-ink-soft hover:text-accent" href="tel:{{ contact.phone }}">{{ contact.phone }}</a></div>{% endif %}
+            {% if contact.company %}<div class="flex items-start gap-2"><span class="mt-0.5 text-ink-dim">{{ icon("building", "icon-sm") }}</span><a class="text-ink-soft hover:text-accent" href="/companies/{{ contact.company.id }}">{{ contact.company.name }}</a></div>{% endif %}
+            <div class="flex items-start gap-2"><span class="mt-0.5 text-ink-dim">{{ icon("calendar", "icon-sm") }}</span><span class="text-ink-soft">В базе с {{ contact.created_at|dt('%d.%m.%Y') }}</span></div>
+          </dl>
+          <div class="mt-4 border-t border-line pt-3.5">
+            <p class="section-label mb-2">Ответственный</p>
+            {% if contact.owner %}<div class="flex items-center gap-2.5">{{ avatar(contact.owner.full_name) }}<div><p class="text-[12px] font-semibold text-ink">{{ contact.owner.full_name }}</p><p class="text-[10.5px] text-ink-dim">{{ contact.owner.job_title or contact.owner.email }}</p></div></div>
+            {% else %}<p class="text-[11.5px] text-ink-dim">Не назначен</p>{% endif %}
+          </div>
+        </div>
+      </section>
+
+      {% if contact.company %}
+      <section class="card">
+        <div class="card-header"><h2 class="card-title">Компания</h2></div>
+        <div class="card-body">
+          <a href="/companies/{{ contact.company.id }}" class="flex items-center gap-3 rounded-xl border border-line bg-zinc-50/60 p-3 transition hover:border-line-strong">
+            <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white text-[10px] font-bold uppercase text-ink-muted shadow-sm">{{ contact.company.name|initials }}</span>
+            <span class="min-w-0"><span class="block truncate text-[12.5px] font-semibold text-ink">{{ contact.company.name }}</span><span class="block truncate text-[10.5px] text-ink-dim">{{ contact.company.industry or contact.company.domain or 'Компания' }}</span></span>
+            {{ icon("chevron-right", "ml-auto icon-sm text-ink-dim") }}
+          </a>
+          <a href="/contacts?company_id={{ contact.company.id }}" class="btn btn-secondary btn-sm mt-3 w-full">Коллеги в компании</a>
+        </div>
+      </section>
+      {% endif %}
+    </aside>
+  </div>
+
+  <div x-show="modalOpen" x-cloak class="modal-backdrop" @click.self="modalOpen = false" @keydown.escape.window="modalOpen = false">
+    <div class="modal-panel max-w-[560px] animate-fade-up">
+      <div class="modal-head">
+        <h2 class="text-[15px] font-semibold text-ink">Редактирование контакта</h2>
+        <button type="button" class="btn-icon" @click="modalOpen = false" aria-label="Закрыть">{{ icon("x") }}</button>
+      </div>
+      <form @submit.prevent="save()">
+        <div class="modal-body space-y-4">
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div><label class="label">Имя *</label><input class="field" x-model.trim="form.full_name" required></div>
+            <div><label class="label">Должность</label><input class="field" x-model.trim="form.position"></div>
+            <div><label class="label">Email</label><input type="email" class="field" x-model.trim="form.email"></div>
+            <div><label class="label">Телефон</label><input class="field" x-model.trim="form.phone"></div>
+            <div><label class="label">Компания</label><select class="field" x-model.number="form.company_id"><option value="">Не выбрана</option>{% for company in companies %}<option value="{{ company.id }}">{{ company.name }}</option>{% endfor %}</select></div>
+            <div><label class="label">Ответственный</label><select class="field" x-model.number="form.owner_id"><option value="">Не назначен</option>{% for member in team %}<option value="{{ member.id }}">{{ member.full_name }}</option>{% endfor %}</select></div>
+          </div>
+          <div><label class="label">Заметки</label><textarea class="field min-h-[80px] resize-y" x-model="form.notes"></textarea></div>
+          <label class="flex cursor-pointer items-center gap-2 text-[12px] font-medium text-ink-soft"><input type="checkbox" class="h-3.5 w-3.5 rounded border-line-strong text-accent focus:ring-accent/25" x-model="form.is_primary"> Основной контакт компании</label>
+          <p x-show="error" x-cloak class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] font-medium text-rose-700" x-text="error"></p>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn btn-secondary" @click="modalOpen = false">Отмена</button>
+          <button type="submit" class="btn btn-primary" :disabled="saving" x-text="saving ? 'Сохраняем…' : 'Сохранить'"></button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.contactDetail = function () {
+  return {
+    modalOpen: false, saving: false, error: '', contactId: {{ contact.id }},
+    form: {{ {
+      "full_name": contact.full_name, "position": contact.position, "email": contact.email,
+      "phone": contact.phone, "company_id": contact.company_id, "owner_id": contact.owner_id,
+      "notes": contact.notes, "is_primary": contact.is_primary
+    }|tojson }},
+    init() {},
+    openEdit() { this.error = ''; this.modalOpen = true; },
+    async save() {
+      if (!this.form.full_name.trim()) { this.error = 'Укажите имя'; return; }
+      this.saving = true; this.error = '';
+      const payload = Object.assign({}, this.form, {
+        company_id: this.form.company_id ? Number(this.form.company_id) : null,
+        owner_id: this.form.owner_id ? Number(this.form.owner_id) : null,
+      });
+      try {
+        await apiJson('/api/contacts/' + this.contactId, { method: 'PATCH', body: JSON.stringify(payload) });
+        window.location.href = '/contacts/' + this.contactId + '?msg=' + encodeURIComponent('Контакт обновлён');
+      } catch (error) { this.error = error.message; }
+      finally { this.saving = false; }
+    },
+    async remove() {
+      const ok = await confirmAction({ title: 'Удалить контакт?', text: 'Связанные сделки останутся, но потеряют привязку к контакту.', confirmText: 'Удалить', danger: true });
+      if (!ok) return;
+      try {
+        await apiJson('/api/contacts/' + this.contactId, { method: 'DELETE' });
+        window.location.href = '/contacts?msg=' + encodeURIComponent('Контакт удалён');
+      } catch (error) { toast(error.message, 'error'); }
+    },
+  };
+};
+</script>
+{% endblock %}

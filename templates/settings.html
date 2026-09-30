@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, avatar %}
+{% block title %}Настройки — {{ app_name }}{% endblock %}
+
+{% block content %}
+<div x-data="settingsPage()" x-init="init()">
+  <div class="page-head">
+    <div>
+      <p class="eyebrow">Account</p>
+      <h1 class="page-title">Настройки</h1>
+      <p class="page-sub">Профиль, пароль и состояние рабочего пространства. Изменения применяются сразу и попадают в журнал.</p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <a href="/reports" class="btn btn-secondary">{{ icon("chart", "icon-sm") }} Отчёты</a>
+      <a href="/chat" class="btn btn-secondary">{{ icon("sparkles", "icon-sm") }} AI-ассистент</a>
+    </div>
+  </div>
+
+  <div class="grid gap-4 xl:grid-cols-[300px_1fr]">
+    <aside class="space-y-4">
+      <section class="card overflow-hidden">
+        <div class="relative h-20 bg-sidebar">
+          <div class="pointer-events-none absolute inset-0 opacity-60">
+            <div class="absolute -right-6 -top-10 h-32 w-32 rounded-full border border-white/10"></div>
+            <div class="absolute -bottom-12 left-6 h-24 w-24 rounded-full bg-accent/25 blur-2xl"></div>
+          </div>
+        </div>
+        <div class="px-5 pb-5">
+          <div class="-mt-7 flex items-end justify-between">
+            {{ avatar(user.full_name, 'avatar-lg ring-4 ring-white') }}
+            <span class="chip {{ 'chip-accent' if user.role == 'admin' else 'chip-neutral' }}">{{ 'Администратор' if user.role == 'admin' else 'Сотрудник' }}</span>
+          </div>
+          <h2 class="mt-3 text-[15px] font-semibold text-ink">{{ user.full_name }}</h2>
+          <p class="text-[11.5px] text-ink-muted">{{ user.job_title or 'Должность не указана' }}</p>
+          <dl class="mt-4 space-y-2.5 border-t border-line pt-4 text-[11.5px]">
+            <div class="flex items-start justify-between gap-3"><dt class="text-ink-dim">Логин</dt><dd class="font-mono text-[11px] text-ink-soft">@{{ user.username }}</dd></div>
+            <div class="flex items-start justify-between gap-3"><dt class="text-ink-dim">Email</dt><dd class="max-w-[170px] truncate text-ink-soft">{{ user.email }}</dd></div>
+            <div class="flex items-start justify-between gap-3"><dt class="text-ink-dim">Телефон</dt><dd class="text-ink-soft">{{ user.phone or '—' }}</dd></div>
+            <div class="flex items-start justify-between gap-3"><dt class="text-ink-dim">Telegram</dt><dd><span class="chip {{ 'status-done' if user.telegram_id else 'chip-neutral' }}">{{ ('ID ' ~ user.telegram_id) if user.telegram_id else 'не привязан' }}</span></dd></div>
+            <div class="flex items-start justify-between gap-3"><dt class="text-ink-dim">Последний вход</dt><dd class="text-ink-soft">{{ user.last_login_at|relative if user.last_login_at else '—' }}</dd></div>
+            <div class="flex items-start justify-between gap-3"><dt class="text-ink-dim">В системе с</dt><dd class="text-ink-soft">{{ user.created_at|dt('%d.%m.%Y') if user.created_at else '—' }}</dd></div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="card p-4">
+        <p class="section-label mb-2.5">Быстрые действия</p>
+        <div class="space-y-1">
+          <a href="/applications?new=1" class="flex items-center gap-2 rounded-lg px-2 py-2 text-[12px] font-medium text-ink-soft hover:bg-zinc-50 hover:text-ink">{{ icon("plus", "icon-sm") }} Новая сделка</a>
+          <a href="/tasks" class="flex items-center gap-2 rounded-lg px-2 py-2 text-[12px] font-medium text-ink-soft hover:bg-zinc-50 hover:text-ink">{{ icon("check-square", "icon-sm") }} Мои задачи</a>
+          <a href="/applications/export.csv" class="flex items-center gap-2 rounded-lg px-2 py-2 text-[12px] font-medium text-ink-soft hover:bg-zinc-50 hover:text-ink">{{ icon("download", "icon-sm") }} Экспорт сделок</a>
+          {% if user.role == 'admin' %}
+          <a href="/users" class="flex items-center gap-2 rounded-lg px-2 py-2 text-[12px] font-medium text-ink-soft hover:bg-zinc-50 hover:text-ink">{{ icon("users", "icon-sm") }} Сотрудники</a>
+          <a href="/logs" class="flex items-center gap-2 rounded-lg px-2 py-2 text-[12px] font-medium text-ink-soft hover:bg-zinc-50 hover:text-ink">{{ icon("history", "icon-sm") }} Журнал действий</a>
+          {% endif %}
+        </div>
+        <form method="post" action="/logout" class="mt-2 border-t border-line pt-2">
+          <button type="submit" class="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[12px] font-medium text-rose-600 hover:bg-rose-50">{{ icon("logout", "icon-sm") }} Выйти из аккаунта</button>
+        </form>
+      </section>
+    </aside>
+
+    <div class="space-y-4">
+      <section class="card">
+        <div class="card-header">
+          <div><h2 class="card-title">Личные данные</h2><p class="card-hint">Отображаются в сделках, задачах и журнале</p></div>
+          <span class="chip chip-neutral">{{ icon("user", "icon-sm") }} Профиль</span>
+        </div>
+        <form @submit.prevent="saveProfile()">
+          <div class="card-body space-y-4">
+            <div class="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label class="label" for="profile-name">Полное имя *</label>
+                <input id="profile-name" class="field" x-model.trim="profile.full_name" required maxlength="255" autocomplete="name">
+              </div>
+              <div>
+                <label class="label" for="profile-job">Должность</label>
+                <input id="profile-job" class="field" x-model.trim="profile.job_title" maxlength="120" placeholder="Менеджер по продажам">
+              </div>
+              <div>
+                <label class="label" for="profile-email">Email *</label>
+                <input id="profile-email" type="email" class="field" x-model.trim="profile.email" required autocomplete="email">
+              </div>
+              <div>
+                <label class="label" for="profile-phone">Телефон</label>
+                <input id="profile-phone" class="field" x-model.trim="profile.phone" maxlength="64" autocomplete="tel" placeholder="+7 900 000-00-00">
+              </div>
+            </div>
+            <p class="rounded-lg border border-line bg-zinc-50/70 px-3 py-2 text-[11px] leading-relaxed text-ink-muted">Логин <span class="font-mono text-[10.5px] text-ink-soft">@{{ user.username }}</span> и роль меняет только администратор в разделе «Сотрудники».</p>
+            <p x-show="profileError" x-cloak class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] font-medium text-rose-700" x-text="profileError"></p>
+          </div>
+          <div class="modal-foot">
+            <button type="submit" class="btn btn-primary" :disabled="savingProfile" x-text="savingProfile ? 'Сохраняем…' : 'Сохранить профиль'"></button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <div><h2 class="card-title">Безопасность</h2><p class="card-hint">Пароль от веб-панели и API</p></div>
+          <span class="chip chip-neutral">{{ icon("lock", "icon-sm") }} Пароль</span>
+        </div>
+        <form @submit.prevent="changePassword()">
+          <div class="card-body space-y-4">
+            <div class="grid gap-3 sm:grid-cols-3">
+              <div>
+                <label class="label" for="pass-current">Текущий пароль *</label>
+                <input id="pass-current" type="password" class="field" x-model="password.current" required autocomplete="current-password">
+              </div>
+              <div>
+                <label class="label" for="pass-new">Новый пароль *</label>
+                <input id="pass-new" type="password" class="field" x-model="password.next" required minlength="6" autocomplete="new-password">
+              </div>
+              <div>
+                <label class="label" for="pass-confirm">Повторите пароль *</label>
+                <input id="pass-confirm" type="password" class="field" x-model="password.confirm" required minlength="6" autocomplete="new-password">
+              </div>
+            </div>
+            <p class="text-[11px] leading-relaxed text-ink-muted">Минимум 6 символов. После смены пароля текущая сессия продолжит работать; на других устройствах потребуется войти заново после истечения токена ({{ settings.ACCESS_TOKEN_EXPIRE_MINUTES // 60 }} ч).</p>
+            <p x-show="passwordError" x-cloak class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] font-medium text-rose-700" x-text="passwordError"></p>
+            <p x-show="passwordDone" x-cloak class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] font-medium text-emerald-700">Пароль обновлён. Используйте новый пароль при следующем входе.</p>
+          </div>
+          <div class="modal-foot">
+            <button type="submit" class="btn btn-primary" :disabled="savingPassword" x-text="savingPassword ? 'Обновляем…' : 'Изменить пароль'"></button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <div><h2 class="card-title">Рабочее пространство</h2><p class="card-hint">Состояние сервисов и ограничения</p></div>
+          <span class="chip chip-neutral">v{{ app_version|default('7.0.0') }}</span>
+        </div>
+        <div class="card-body">
+          <dl class="divide-y divide-line/70 text-[12px]">
+            <div class="flex flex-wrap items-center justify-between gap-2 py-2.5 first:pt-0">
+              <dt class="flex items-center gap-2 text-ink-muted">{{ icon("sparkles", "icon-sm") }} AI-ассистент</dt>
+              <dd><span class="chip {{ 'status-done' if ai_enabled else 'chip-neutral' }}">{{ 'Подключён · ' ~ settings.AI_MODEL if ai_enabled else 'Локальный режим' }}</span></dd>
+            </div>
+            <div class="flex flex-wrap items-center justify-between gap-2 py-2.5">
+              <dt class="flex items-center gap-2 text-ink-muted">{{ icon("send", "icon-sm") }} Telegram</dt>
+              <dd><span class="chip {{ 'status-done' if settings.telegram_enabled else 'chip-neutral' }}">{{ 'Включён' if settings.telegram_enabled else 'Не настроен' }}</span></dd>
+            </div>
+            <div class="flex flex-wrap items-center justify-between gap-2 py-2.5">
+              <dt class="flex items-center gap-2 text-ink-muted">{{ icon("database", "icon-sm") }} База данных</dt>
+              <dd class="font-mono text-[10.5px] text-ink-soft">SQLite · {{ settings.DATABASE_URL.split('/')[-1] }}</dd>
+            </div>
+            <div class="flex flex-wrap items-center justify-between gap-2 py-2.5">
+              <dt class="flex items-center gap-2 text-ink-muted">{{ icon("globe", "icon-sm") }} Окружение</dt>
+              <dd class="text-ink-soft">{{ settings.ENVIRONMENT }}{{ ' · debug' if settings.DEBUG else '' }}</dd>
+            </div>
+            <div class="flex flex-wrap items-center justify-between gap-2 py-2.5">
+              <dt class="flex items-center gap-2 text-ink-muted">{{ icon("shield", "icon-sm") }} Защита входа</dt>
+              <dd class="text-ink-soft">{{ settings.LOGIN_MAX_ATTEMPTS }} попыток / {{ settings.LOGIN_WINDOW_SECONDS // 60 }} мин</dd>
+            </div>
+            <div class="flex flex-wrap items-center justify-between gap-2 py-2.5 last:pb-0">
+              <dt class="flex items-center gap-2 text-ink-muted">{{ icon("lock", "icon-sm") }} Cookie</dt>
+              <dd><span class="chip {{ 'status-done' if settings.COOKIE_SECURE else 'chip-neutral' }}">{{ 'Secure' if settings.COOKIE_SECURE else 'Local HTTP' }}</span></dd>
+            </div>
+          </dl>
+
+          {% if user.role == 'admin' %}
+          <div class="mt-4 grid gap-2 border-t border-line pt-4 sm:grid-cols-3">
+            <a href="/users" class="rounded-xl border border-line p-3 transition hover:border-line-strong hover:bg-zinc-50"><span class="flex items-center gap-2 text-[12px] font-semibold text-ink">{{ icon("users", "icon-sm") }} Сотрудники</span><span class="mt-1 block text-[10.5px] text-ink-dim">Роли и доступы</span></a>
+            <a href="/logs" class="rounded-xl border border-line p-3 transition hover:border-line-strong hover:bg-zinc-50"><span class="flex items-center gap-2 text-[12px] font-semibold text-ink">{{ icon("history", "icon-sm") }} Аудит</span><span class="mt-1 block text-[10.5px] text-ink-dim">Все действия</span></a>
+            <a href="/bot" class="rounded-xl border border-line p-3 transition hover:border-line-strong hover:bg-zinc-50"><span class="flex items-center gap-2 text-[12px] font-semibold text-ink">{{ icon("send", "icon-sm") }} Telegram</span><span class="mt-1 block text-[10.5px] text-ink-dim">Бот и привязки</span></a>
+          </div>
+          {% endif %}
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.settingsPage = function () {
+  return {
+    profile: {
+      full_name: {{ (user.full_name or '')|tojson }},
+      email: {{ (user.email or '')|tojson }},
+      job_title: {{ (user.job_title or '')|tojson }},
+      phone: {{ (user.phone or '')|tojson }},
+    },
+    password: { current: '', next: '', confirm: '' },
+    savingProfile: false, savingPassword: false,
+    profileError: '', passwordError: '', passwordDone: false,
+
+    init() {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('msg')) toast(params.get('msg'));
+    },
+
+    async saveProfile() {
+      this.profileError = '';
+      if (!this.profile.full_name.trim()) { this.profileError = 'Укажите полное имя'; return; }
+      this.savingProfile = true;
+      try {
+        await apiJson('/api/me', { method: 'PATCH', body: JSON.stringify(this.profile) });
+        toast('Профиль сохранён');
+        window.setTimeout(() => window.location.reload(), 600);
+      } catch (error) { this.profileError = error.message; }
+      finally { this.savingProfile = false; }
+    },
+
+    async changePassword() {
+      this.passwordError = '';
+      this.passwordDone = false;
+      if (this.password.next.length < 6) { this.passwordError = 'Новый пароль должен быть не короче 6 символов'; return; }
+      if (this.password.next !== this.password.confirm) { this.passwordError = 'Пароли не совпадают'; return; }
+      this.savingPassword = true;
+      try {
+        await apiJson('/api/me/password', {
+          method: 'POST',
+          body: JSON.stringify({ current_password: this.password.current, new_password: this.password.next }),
+        });
+        this.password = { current: '', next: '', confirm: '' };
+        this.passwordDone = true;
+        toast('Пароль обновлён');
+      } catch (error) { this.passwordError = error.message; }
+      finally { this.savingPassword = false; }
+    },
+  };
+};
+</script>
+{% endblock %}

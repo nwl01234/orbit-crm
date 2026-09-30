@@ -1,0 +1,575 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, avatar, status_badge, priority_badge, empty_state %}
+{% block title %}Сделки — {{ app_name }}{% endblock %}
+
+{% block topbar_actions %}
+<button type="button" class="btn btn-primary btn-sm hidden sm:inline-flex" onclick="window.dispatchEvent(new CustomEvent('open-deal'))">{{ icon("plus", "icon-sm") }} Сделка</button>
+{% endblock %}
+
+{% block content %}
+<div x-data="applicationsPage()" x-init="init()">
+  <div class="page-head">
+    <div>
+      <p class="eyebrow">Pipeline</p>
+      <h1 class="page-title">Сделки и заявки</h1>
+      <p class="page-sub">Единый список обращений: фильтры, массовые действия, импорт и экспорт. <span class="text-ink-soft font-medium" x-text="total + ' ' + plural(total, 'запись', 'записи', 'записей')"></span>.</p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <button type="button" class="btn btn-secondary" @click="importOpen = true">{{ icon("upload", "icon-sm") }} Импорт</button>
+      <a class="btn btn-secondary" :href="exportUrl()">{{ icon("download", "icon-sm") }} CSV</a>
+      <button type="button" class="btn btn-primary" @click="openCreate()">{{ icon("plus", "icon-sm") }} Новая сделка</button>
+    </div>
+  </div>
+
+  <section class="card mb-4">
+    <div class="flex flex-wrap items-center gap-2 border-b border-line p-3">
+      <div class="search-box min-w-[220px] flex-1">
+        {{ icon("search", "icon-sm") }}
+        <input type="search" x-model="filters.q" @input.debounce.300ms="applyFilters()" placeholder="Название, клиент, email, теги…" aria-label="Поиск сделок">
+      </div>
+      <select class="field field-sm w-auto" x-model="filters.status" @change="applyFilters()" aria-label="Статус">
+        <option value="">Все статусы</option>
+        {% for key, label in status_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+      </select>
+      <select class="field field-sm w-auto" x-model="filters.priority" @change="applyFilters()" aria-label="Приоритет">
+        <option value="">Приоритет</option>
+        {% for key, label in priority_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+      </select>
+      <select class="field field-sm w-auto" x-model="filters.assigned_to_id" @change="applyFilters()" aria-label="Ответственный">
+        <option value="">Ответственный</option>
+        <option value="unassigned">Без ответственного</option>
+        {% for member in team %}<option value="{{ member.id }}">{{ member.full_name }}</option>{% endfor %}
+      </select>
+      <button type="button" class="btn btn-secondary btn-sm" @click="advanced = !advanced" :class="advanced ? 'border-accent/40 text-accent' : ''">{{ icon("filter", "icon-sm") }} Ещё</button>
+      <button type="button" class="btn btn-ghost btn-sm" @click="resetFilters()" x-show="hasFilters" x-cloak>Сбросить</button>
+    </div>
+
+    <div x-show="advanced" x-cloak class="flex flex-wrap items-end gap-2 border-b border-line bg-zinc-50/60 p-3">
+      <div class="min-w-[150px]">
+        <label class="label text-[9px]">Категория</label>
+        <select class="field field-sm" x-model="filters.category" @change="applyFilters()">
+          <option value="">Все</option>
+          {% for key, label in category_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="min-w-[130px]">
+        <label class="label text-[9px]">Источник</label>
+        <select class="field field-sm" x-model="filters.source" @change="applyFilters()">
+          <option value="">Все</option>
+          {% for key, label in source_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="min-w-[150px]">
+        <label class="label text-[9px]">Сортировка</label>
+        <select class="field field-sm" x-model="sort" @change="applyFilters()">
+          <option value="created_at">По созданию</option>
+          <option value="updated_at">По обновлению</option>
+          <option value="due_date">По сроку</option>
+          <option value="amount">По сумме</option>
+          <option value="priority">По приоритету</option>
+          <option value="title">По названию</option>
+        </select>
+      </div>
+      <div class="min-w-[110px]">
+        <label class="label text-[9px]">Порядок</label>
+        <select class="field field-sm" x-model="order" @change="applyFilters()">
+          <option value="desc">Сначала новые</option>
+          <option value="asc">Сначала старые</option>
+        </select>
+      </div>
+      <label class="flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-line-strong bg-white px-3 text-[11.5px] font-medium text-ink-soft">
+        <input type="checkbox" class="h-3.5 w-3.5 rounded border-line-strong text-accent focus:ring-accent/25" x-model="filters.starred" @change="applyFilters()"> Только избранные
+      </label>
+      <label class="flex h-8 cursor-pointer items-center gap-2 rounded-lg border border-line-strong bg-white px-3 text-[11.5px] font-medium text-ink-soft">
+        <input type="checkbox" class="h-3.5 w-3.5 rounded border-line-strong text-accent focus:ring-accent/25" x-model="filters.overdue" @change="applyFilters()"> Просроченные
+      </label>
+    </div>
+
+    <div x-show="selectedIds.length" x-cloak class="flex flex-wrap items-center gap-2 border-b border-accent/20 bg-accent-soft px-3 py-2">
+      <span class="text-[11.5px] font-semibold text-accent-ink">Выбрано: <span x-text="selectedIds.length"></span></span>
+      <span class="mx-1 h-4 w-px bg-accent/20"></span>
+      <button type="button" class="btn btn-secondary btn-sm" @click="bulkStatus('in_progress')">В работу</button>
+      <button type="button" class="btn btn-secondary btn-sm" @click="bulkStatus('done')">Завершить</button>
+      <button type="button" class="btn btn-secondary btn-sm" @click="bulkStatus('cancelled')">Отменить</button>
+      <button type="button" class="btn btn-ghost btn-sm ml-auto" @click="selectedIds = []">Снять выбор</button>
+    </div>
+
+    <div x-show="filters.company_id || filters.contact_id" x-cloak class="flex flex-wrap items-center gap-2 border-b border-line bg-accent-soft/60 px-3 py-2">
+      <span class="text-[11.5px] font-medium text-accent-ink" x-text="filters.company_id ? 'Показаны сделки выбранной компании' : 'Показаны сделки выбранного контакта'"></span>
+      <button type="button" class="btn btn-ghost btn-sm ml-auto" @click="filters.company_id = ''; filters.contact_id = ''; applyFilters()">Сбросить</button>
+    </div>
+
+    <div class="relative table-wrap">
+      <div x-show="loading" x-cloak class="absolute inset-0 z-10 grid place-items-center bg-white/70 backdrop-blur-[1px]">
+        <span class="flex items-center gap-2 text-[12px] font-medium text-ink-muted"><svg class="icon icon-sm animate-spin"><use href="#i-refresh"></use></svg> Загружаем сделки…</span>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th class="w-9"><input type="checkbox" class="h-3.5 w-3.5 rounded border-line-strong text-accent focus:ring-accent/25" :checked="allSelected" @change="toggleAll($event.target.checked)" aria-label="Выбрать все"></th>
+            <th>Сделка</th>
+            <th>Клиент</th>
+            <th>Статус</th>
+            <th>Приоритет</th>
+            <th class="text-right">Сумма</th>
+            <th>Срок</th>
+            <th>Ответственный</th>
+            <th class="w-24 text-right">Действия</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="item in items" :key="item.id">
+            <tr :class="item.status === 'cancelled' ? 'row-muted' : ''">
+              <td><input type="checkbox" class="h-3.5 w-3.5 rounded border-line-strong text-accent focus:ring-accent/25" :value="item.id" x-model="selectedIds" :aria-label="'Выбрать сделку ' + item.id"></td>
+              <td class="max-w-[300px]">
+                <div class="flex items-start gap-2">
+                  <button type="button" class="mt-0.5 shrink-0" @click="toggleStar(item)" :aria-label="item.starred ? 'Убрать из избранного' : 'В избранное'">
+                    <svg class="icon icon-sm" :class="item.starred ? 'fill-amber-400 text-amber-500' : 'text-ink-dim hover:text-amber-500'"><use href="#i-star"></use></svg>
+                  </button>
+                  <div class="min-w-0">
+                    <a class="flex items-center gap-1.5" :href="'/applications/' + item.id">
+                      <span class="text-[10px] font-semibold tabular-nums text-ink-dim" x-text="'#' + item.id"></span>
+                      <span class="truncate font-medium text-ink hover:text-accent" x-text="item.title"></span>
+                    </a>
+                    <div class="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10.5px] text-ink-dim">
+                      <span x-text="categoryLabel(item.category)"></span>
+                      <template x-if="item.tags"><span>·</span></template>
+                      <span class="truncate" x-text="item.tags"></span>
+                      <template x-if="item.open_tasks_count > 0"><span class="chip chip-neutral h-[18px] px-1.5 text-[9px]" x-text="'задач: ' + item.open_tasks_count"></span></template>
+                      <template x-if="item.comments_count > 0"><span class="chip chip-neutral h-[18px] px-1.5 text-[9px]" x-text="'комм.: ' + item.comments_count"></span></template>
+                    </div>
+                  </div>
+                </div>
+              </td>
+              <td class="max-w-[190px]">
+                <span class="block truncate text-[11.5px] font-medium text-ink-soft" x-text="item.company_name || item.client_name || '—'"></span>
+                <span class="block truncate text-[10px] text-ink-dim" x-text="item.contact_name || item.client_email || ''"></span>
+              </td>
+              <td><span class="chip" :class="statusChip(item.status)" x-text="statusLabel(item.status)"></span></td>
+              <td><span class="chip" :class="priorityChip(item.priority)" x-text="priorityLabel(item.priority)"></span></td>
+              <td class="text-right font-medium tabular-nums text-ink-soft" x-text="formatMoney(item.amount)"></td>
+              <td>
+                <span class="whitespace-nowrap text-[11px]" :class="isOverdue(item) ? 'overdue' : 'text-ink-muted'" x-text="item.due_date ? dueLabel(item.due_date) : '—'"></span>
+              </td>
+              <td>
+                <div class="flex items-center gap-2" x-show="item.assigned_to_name">
+                  <span class="avatar avatar-sm" x-text="initials(item.assigned_to_name)"></span>
+                  <span class="max-w-[110px] truncate text-[11px] text-ink-soft" x-text="item.assigned_to_name"></span>
+                </div>
+                <span class="text-[11px] text-ink-dim" x-show="!item.assigned_to_name">Не назначен</span>
+              </td>
+              <td class="text-right">
+                <div class="flex items-center justify-end gap-0.5">
+                  <button type="button" class="btn-icon-sm" @click="openEdit(item)" aria-label="Редактировать"><svg class="icon icon-sm"><use href="#i-edit"></use></svg></button>
+                  <a class="btn-icon-sm" :href="'/applications/' + item.id" aria-label="Открыть"><svg class="icon icon-sm"><use href="#i-external"></use></svg></a>
+                  <button type="button" class="btn-icon-sm hover:text-rose-600" @click="remove(item)" aria-label="Удалить"><svg class="icon icon-sm"><use href="#i-trash"></use></svg></button>
+                </div>
+              </td>
+            </tr>
+          </template>
+          <tr x-show="!loading && !items.length" x-cloak>
+            <td colspan="9">
+              <div class="empty-state">
+                <span class="empty-icon"><svg class="icon"><use href="#i-inbox"></use></svg></span>
+                <p class="text-[13px] font-semibold text-ink">Сделок не найдено</p>
+                <p class="mt-1 max-w-sm text-[12px] leading-relaxed text-ink-muted">Измените фильтры или создайте первую сделку — она сразу появится в воронке.</p>
+                <button type="button" class="btn btn-primary btn-sm mt-3" @click="hasFilters ? resetFilters() : openCreate()" x-text="hasFilters ? 'Сбросить фильтры' : 'Создать сделку'"></button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3">
+      <p class="text-[11px] text-ink-dim">
+        <span x-text="total ? (offset + 1) : 0"></span>–<span x-text="Math.min(offset + limit, total)"></span> из <span x-text="total"></span>
+        <span x-show="selectedIds.length" x-cloak> · выбрано <span x-text="selectedIds.length"></span></span>
+      </p>
+      <div class="flex items-center gap-1">
+        <button type="button" class="btn btn-secondary btn-sm" @click="goToPage(page - 1)" :disabled="page <= 1">{{ icon("chevron-left", "icon-sm") }} Назад</button>
+        <span class="px-2 text-[11px] font-medium text-ink-muted" x-text="'Стр. ' + page + ' / ' + pages"></span>
+        <button type="button" class="btn btn-secondary btn-sm" @click="goToPage(page + 1)" :disabled="page >= pages">Далее {{ icon("chevron-right", "icon-sm") }}</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="grid gap-3 sm:grid-cols-3">
+    <a href="/kanban" class="card flex items-center gap-3 p-4 transition hover:border-line-strong hover:shadow-lift">
+      <span class="grid h-9 w-9 place-items-center rounded-lg bg-accent-soft text-accent">{{ icon("columns") }}</span>
+      <span><span class="block text-[12px] font-semibold text-ink">Канбан-доска</span><span class="block text-[10.5px] text-ink-dim">Перетаскивайте сделки между этапами</span></span>
+      {{ icon("arrow-right", "ml-auto icon-sm text-ink-dim") }}
+    </a>
+    <a href="/companies" class="card flex items-center gap-3 p-4 transition hover:border-line-strong hover:shadow-lift">
+      <span class="grid h-9 w-9 place-items-center rounded-lg bg-zinc-100 text-ink-muted">{{ icon("building") }}</span>
+      <span><span class="block text-[12px] font-semibold text-ink">Компании</span><span class="block text-[10.5px] text-ink-dim">Клиентская база и история сделок</span></span>
+      {{ icon("arrow-right", "ml-auto icon-sm text-ink-dim") }}
+    </a>
+    <a href="/reports" class="card flex items-center gap-3 p-4 transition hover:border-line-strong hover:shadow-lift">
+      <span class="grid h-9 w-9 place-items-center rounded-lg bg-zinc-100 text-ink-muted">{{ icon("chart") }}</span>
+      <span><span class="block text-[12px] font-semibold text-ink">Аналитика</span><span class="block text-[10.5px] text-ink-dim">Конверсия, цикл сделки и выручка</span></span>
+      {{ icon("arrow-right", "ml-auto icon-sm text-ink-dim") }}
+    </a>
+  </div>
+
+  <!-- create / edit -->
+  <div x-show="modalOpen" x-cloak class="modal-backdrop" @click.self="modalOpen = false" @keydown.escape.window="modalOpen = false">
+    <div class="modal-panel max-w-[720px] animate-fade-up" role="dialog" aria-modal="true" aria-labelledby="deal-modal-title">
+      <div class="modal-head">
+        <div>
+          <h2 class="text-[15px] font-semibold text-ink" id="deal-modal-title" x-text="editing ? 'Сделка #' + editing.id : 'Новая сделка'"></h2>
+          <p class="mt-0.5 text-[11px] text-ink-dim" x-text="editing ? 'Измените поля и сохраните' : 'Заполните основное — детали можно добавить позже'"></p>
+        </div>
+        <button type="button" class="btn-icon" @click="modalOpen = false" aria-label="Закрыть">{{ icon("x") }}</button>
+      </div>
+      <form @submit.prevent="save()">
+        <div class="modal-body space-y-5">
+          <div class="grid gap-3 sm:grid-cols-[1fr_170px]">
+            <div>
+              <label class="label" for="deal-title">Название сделки *</label>
+              <input id="deal-title" x-ref="titleInput" class="field" x-model.trim="form.title" required maxlength="255" placeholder="Например: внедрение CRM для Ромашки">
+            </div>
+            <div>
+              <label class="label" for="deal-amount">Сумма, ₽</label>
+              <input id="deal-amount" type="number" min="0" step="1" class="field tabular-nums" x-model.number="form.amount" placeholder="0">
+            </div>
+          </div>
+
+          <div class="grid gap-3 sm:grid-cols-3">
+            <div>
+              <label class="label" for="deal-status">Статус</label>
+              <select id="deal-status" class="field" x-model="form.status">
+                {% for key, label in status_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="deal-priority">Приоритет</label>
+              <select id="deal-priority" class="field" x-model="form.priority">
+                {% for key, label in priority_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="deal-due">Срок</label>
+              <input id="deal-due" type="date" class="field" x-model="form.due_date">
+            </div>
+          </div>
+
+          <div class="rounded-xl border border-line bg-zinc-50/60 p-3.5">
+            <p class="section-label mb-2.5">Клиент</p>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label class="label" for="deal-company">Компания</label>
+                <select id="deal-company" class="field" x-model.number="form.company_id">
+                  <option value="">Не выбрана</option>
+                  {% for company in companies %}<option value="{{ company.id }}">{{ company.name }}</option>{% endfor %}
+                </select>
+              </div>
+              <div>
+                <label class="label" for="deal-client">Клиент / контактное лицо</label>
+                <input id="deal-client" class="field" x-model.trim="form.client_name" placeholder="Имя или название">
+                <p class="field-hint">Если компании нет — она создастся автоматически.</p>
+              </div>
+              <div>
+                <label class="label" for="deal-email">Email</label>
+                <input id="deal-email" type="email" class="field" x-model.trim="form.client_email" placeholder="client@company.ru">
+              </div>
+              <div>
+                <label class="label" for="deal-phone">Телефон</label>
+                <input id="deal-phone" class="field" x-model.trim="form.client_phone" placeholder="+7 900 000-00-00">
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="deal-contact">Контакт из базы</label>
+                <select id="deal-contact" class="field" x-model.number="form.contact_id">
+                  <option value="">Не выбран</option>
+                  {% for contact in contacts %}<option value="{{ contact.id }}">{{ contact.full_name }}{% if contact.company %} — {{ contact.company.name }}{% endif %}</option>{% endfor %}
+                </select>
+                <p class="field-hint">Свяжет сделку с карточкой контакта и историей коммуникаций.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid gap-3 sm:grid-cols-3">
+            <div>
+              <label class="label" for="deal-category">Категория</label>
+              <select id="deal-category" class="field" x-model="form.category">
+                {% for key, label in category_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="deal-source">Источник</label>
+              <select id="deal-source" class="field" x-model="form.source">
+                {% for key, label in source_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="deal-assignee">Ответственный</label>
+              <select id="deal-assignee" class="field" x-model.number="form.assigned_to_id">
+                <option value="">Не назначен</option>
+                {% for member in team %}<option value="{{ member.id }}">{{ member.full_name }}</option>{% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <div class="grid gap-3 sm:grid-cols-[1fr_220px]">
+            <div>
+              <label class="label" for="deal-tags">Теги</label>
+              <input id="deal-tags" class="field" x-model.trim="form.tags" placeholder="через запятую: внедрение, upsell">
+            </div>
+            <label class="flex cursor-pointer items-center gap-2 self-end rounded-lg border border-line-strong bg-white px-3 py-2 text-[12px] font-medium text-ink-soft">
+              <input type="checkbox" class="h-3.5 w-3.5 rounded border-line-strong text-accent focus:ring-accent/25" x-model="form.starred"> В избранное
+            </label>
+          </div>
+
+          <div>
+            <label class="label" for="deal-description">Описание</label>
+            <textarea id="deal-description" class="field min-h-[90px] resize-y" x-model="form.description" placeholder="Контекст, договорённости, следующий шаг…"></textarea>
+          </div>
+
+          <div x-show="form.status === 'cancelled'" x-cloak>
+            <label class="label" for="deal-lost">Причина отказа</label>
+            <input id="deal-lost" class="field" x-model.trim="form.lost_reason" placeholder="Например: выбрали конкурента">
+          </div>
+
+          <p x-show="error" x-cloak class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] font-medium text-rose-700" x-text="error"></p>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn btn-secondary" @click="modalOpen = false">Отмена</button>
+          <button type="submit" class="btn btn-primary" :disabled="saving">
+            <svg x-show="saving" x-cloak class="icon icon-sm animate-spin"><use href="#i-refresh"></use></svg>
+            <span x-text="saving ? 'Сохраняем…' : (editing ? 'Сохранить изменения' : 'Создать сделку')"></span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- import -->
+  <div x-show="importOpen" x-cloak class="modal-backdrop" @click.self="importOpen = false">
+    <div class="modal-panel max-w-[480px] animate-fade-up">
+      <div class="modal-head">
+        <h2 class="text-[15px] font-semibold text-ink">Импорт из CSV</h2>
+        <button type="button" class="btn-icon" @click="importOpen = false" aria-label="Закрыть">{{ icon("x") }}</button>
+      </div>
+      <div class="modal-body space-y-4">
+        <p class="text-[12.5px] leading-relaxed text-ink-muted">Загрузите файл с колонкой <span class="font-mono text-[11px] text-ink">title</span>. Поддерживаются: status, priority, category, source, tags, amount, due_date, client_name, client_email, client_phone, description.</p>
+        <label class="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-line-strong bg-zinc-50/60 px-4 py-8 text-center transition hover:border-accent/50 hover:bg-accent-soft/40">
+          <svg class="icon icon-lg text-ink-dim"><use href="#i-upload"></use></svg>
+          <span class="mt-2 text-[12.5px] font-medium text-ink" x-text="importFile ? importFile.name : 'Выберите CSV-файл'"></span>
+          <span class="mt-1 text-[10.5px] text-ink-dim">до 5 МБ · UTF-8 или Windows-1251</span>
+          <input type="file" accept=".csv,text/csv" class="sr-only" @change="importFile = $event.target.files[0]">
+        </label>
+        <p class="text-[11px] text-ink-dim">Импорт создаёт новые сделки и автоматически связывает клиентов с компаниями и контактами.</p>
+      </div>
+      <div class="modal-foot">
+        <a href="data:text/csv;charset=utf-8,title,status,priority,amount,client_name%0AПример%20сделки,new,medium,150000,ООО%20Ромашка" download="orbit-import-template.csv" class="btn btn-ghost mr-auto">Шаблон</a>
+        <button type="button" class="btn btn-secondary" @click="importOpen = false">Отмена</button>
+        <button type="button" class="btn btn-primary" :disabled="!importFile || importing" @click="runImport()" x-text="importing ? 'Импортируем…' : 'Импортировать'"></button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.applicationsPage = function () {
+  return {
+    items: [], total: 0, limit: 25, offset: 0, loading: true, saving: false,
+    filters: { q: '', status: '', priority: '', category: '', source: '', assigned_to_id: '', starred: false, overdue: false, company_id: '', contact_id: '' },
+    sort: 'created_at', order: 'desc', advanced: false,
+    selectedIds: [], modalOpen: false, editing: null, error: '',
+    importOpen: false, importFile: null, importing: false,
+    form: {},
+    prefill: { client: '', status: '', company_id: '', contact_id: '' },
+
+    init() {
+      this.resetForm();
+      const params = new URLSearchParams(window.location.search);
+      this.prefill = {
+        client: params.get('client') || '',
+        status: params.get('status') || '',
+        company_id: params.get('company_id') || '',
+        contact_id: params.get('contact_id') || '',
+      };
+      if (this.prefill.client && !params.get('new')) this.filters.q = this.prefill.client;
+      if (this.prefill.status && !params.get('new')) this.filters.status = this.prefill.status;
+      this.filters.company_id = this.prefill.company_id;
+      this.filters.contact_id = this.prefill.contact_id;
+      window.addEventListener('open-deal', () => this.openCreate());
+      this.load();
+      if (params.get('new')) this.openCreate();
+    },
+
+    get page() { return Math.floor(this.offset / this.limit) + 1; },
+    get pages() { return Math.max(1, Math.ceil(this.total / this.limit)); },
+    get allSelected() { return this.items.length > 0 && this.items.every((item) => this.selectedIds.includes(item.id)); },
+    get hasFilters() {
+      return !!(this.filters.q || this.filters.status || this.filters.priority || this.filters.category || this.filters.source || this.filters.assigned_to_id || this.filters.starred || this.filters.overdue || this.filters.company_id || this.filters.contact_id);
+    },
+
+    queryParams() {
+      const params = new URLSearchParams();
+      params.set('limit', this.limit);
+      params.set('offset', this.offset);
+      params.set('sort', this.sort);
+      params.set('order', this.order);
+      if (this.filters.q.trim()) params.set('q', this.filters.q.trim());
+      if (this.filters.status) params.set('status', this.filters.status);
+      if (this.filters.priority) params.set('priority', this.filters.priority);
+      if (this.filters.category) params.set('category', this.filters.category);
+      if (this.filters.source) params.set('source', this.filters.source);
+      if (this.filters.assigned_to_id === 'unassigned') params.set('unassigned', 'true');
+      else if (this.filters.assigned_to_id) params.set('assigned_to_id', this.filters.assigned_to_id);
+      if (this.filters.starred) params.set('starred', 'true');
+      if (this.filters.overdue) params.set('overdue', 'true');
+      if (this.filters.company_id) params.set('company_id', this.filters.company_id);
+      if (this.filters.contact_id) params.set('contact_id', this.filters.contact_id);
+      return params;
+    },
+
+    async load() {
+      this.loading = true;
+      try {
+        const data = await apiJson('/api/applications?' + this.queryParams().toString());
+        this.items = data.items || [];
+        this.total = data.total || 0;
+        if (this.offset >= this.total && this.total > 0) {
+          this.offset = Math.max(0, (Math.ceil(this.total / this.limit) - 1) * this.limit);
+          return this.load();
+        }
+      } catch (error) {
+        toast(error.message, 'error');
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    applyFilters() { this.offset = 0; this.selectedIds = []; this.load(); },
+    resetFilters() {
+      this.filters = { q: '', status: '', priority: '', category: '', source: '', assigned_to_id: '', starred: false, overdue: false, company_id: '', contact_id: '' };
+      this.sort = 'created_at'; this.order = 'desc'; this.applyFilters();
+    },
+    goToPage(page) {
+      if (page < 1 || page > this.pages) return;
+      this.offset = (page - 1) * this.limit;
+      this.selectedIds = [];
+      this.load();
+    },
+    toggleAll(checked) { this.selectedIds = checked ? this.items.map((item) => item.id) : []; },
+
+    async toggleStar(item) {
+      try {
+        const data = await apiJson('/api/applications/' + item.id + '/star', { method: 'POST' });
+        item.starred = data.starred;
+        if (this.filters.starred && !data.starred) { this.load(); }
+      } catch (error) { toast(error.message, 'error'); }
+    },
+
+    async bulkStatus(status) {
+      if (!this.selectedIds.length) return;
+      const ok = await confirmAction({
+        title: 'Изменить статус выбранных?',
+        text: 'Будет обновлено сделок: ' + this.selectedIds.length + '. Действие попадёт в журнал.',
+        confirmText: statusLabel(status),
+      });
+      if (!ok) return;
+      try {
+        const data = await apiJson('/api/applications/bulk-status', { method: 'POST', body: JSON.stringify({ ids: this.selectedIds, status }) });
+        toast('Обновлено сделок: ' + data.updated);
+        this.selectedIds = [];
+        this.load();
+      } catch (error) { toast(error.message, 'error'); }
+    },
+
+    resetForm() {
+      this.form = {
+        title: '', description: '', status: 'new', priority: 'medium', category: 'general', source: 'web',
+        tags: '', due_date: '', amount: 0, lost_reason: '', starred: false,
+        client_name: '', client_email: '', client_phone: '', client_contact: '',
+        company_id: '', contact_id: '', assigned_to_id: '',
+      };
+    },
+
+    openCreate() {
+      this.editing = null; this.error = ''; this.resetForm();
+      this.form.client_name = this.prefill.client || '';
+      this.form.status = this.prefill.status || 'new';
+      this.form.company_id = this.prefill.company_id ? Number(this.prefill.company_id) : '';
+      this.form.contact_id = this.prefill.contact_id ? Number(this.prefill.contact_id) : '';
+      this.modalOpen = true;
+      this.$nextTick(() => { if (this.$refs.titleInput) this.$refs.titleInput.focus(); });
+    },
+
+    openEdit(item) {
+      this.editing = item; this.error = '';
+      this.form = {
+        title: item.title || '', description: item.description || '', status: item.status || 'new',
+        priority: item.priority || 'medium', category: item.category || 'general', source: item.source || 'web',
+        tags: item.tags || '', due_date: item.due_date || '', amount: item.amount || 0,
+        lost_reason: item.lost_reason || '', starred: !!item.starred,
+        client_name: item.client_name || '', client_email: item.client_email || '', client_phone: item.client_phone || '',
+        client_contact: item.client_contact || '', company_id: item.company_id || '', contact_id: item.contact_id || '', assigned_to_id: item.assigned_to_id || '',
+      };
+      this.modalOpen = true;
+    },
+
+    async save() {
+      if (!this.form.title.trim()) { this.error = 'Укажите название сделки'; return; }
+      this.saving = true; this.error = '';
+      const payload = Object.assign({}, this.form, {
+        amount: Number(this.form.amount || 0),
+        company_id: this.form.company_id ? Number(this.form.company_id) : null,
+        contact_id: this.form.contact_id ? Number(this.form.contact_id) : null,
+        assigned_to_id: this.form.assigned_to_id ? Number(this.form.assigned_to_id) : null,
+        due_date: this.form.due_date || null,
+      });
+      try {
+        if (this.editing) {
+          await apiJson('/api/applications/' + this.editing.id, { method: 'PATCH', body: JSON.stringify(payload) });
+          toast('Сделка обновлена');
+        } else {
+          await apiJson('/api/applications', { method: 'POST', body: JSON.stringify(payload) });
+          toast('Сделка создана');
+        }
+        this.modalOpen = false;
+        this.load();
+      } catch (error) {
+        this.error = error.message;
+      } finally {
+        this.saving = false;
+      }
+    },
+
+    async remove(item) {
+      const ok = await confirmAction({
+        title: 'Удалить сделку?',
+        text: '«' + item.title + '» и связанные комментарии/задачи будут удалены безвозвратно.',
+        confirmText: 'Удалить', danger: true,
+      });
+      if (!ok) return;
+      try {
+        await apiJson('/api/applications/' + item.id, { method: 'DELETE' });
+        toast('Сделка удалена');
+        this.load();
+      } catch (error) { toast(error.message, 'error'); }
+    },
+
+    exportUrl() { return '/applications/export.csv?' + this.queryParams().toString(); },
+
+    async runImport() {
+      if (!this.importFile) return;
+      this.importing = true;
+      try {
+        const body = new FormData();
+        body.append('file', this.importFile);
+        const data = await apiJson('/api/applications/import', { method: 'POST', body });
+        toast('Импортировано: ' + data.imported + ', пропущено: ' + data.skipped);
+        this.importOpen = false; this.importFile = null;
+        this.load();
+      } catch (error) { toast(error.message, 'error'); }
+      finally { this.importing = false; }
+    },
+  };
+};
+</script>
+{% endblock %}

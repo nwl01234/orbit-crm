@@ -1,0 +1,43 @@
+{% macro icon(name, cls="") -%}
+<svg class="icon {{ cls }}" aria-hidden="true"><use href="#i-{{ name }}"></use></svg>
+{%- endmacro %}
+
+{% macro avatar(name, cls="", title="") -%}
+<span class="avatar {{ cls }}"{% if title %} title="{{ title }}"{% endif %}>{{ name|initials }}</span>
+{%- endmacro %}
+
+{% macro status_badge(status) -%}
+<span class="chip {{ statusClass(status) }}"><span class="dot"></span>{{ statusLabel(status) }}</span>
+{%- endmacro %}
+
+{% macro priority_badge(priority) -%}
+<span class="chip {{ priorityClass(priority) }}">{{ priorityLabel(priority) }}</span>
+{%- endmacro %}
+
+{% macro kind_badge(kind) -%}
+<span class="chip chip-neutral">{{ taskKindLabel(kind) }}</span>
+{%- endmacro %}
+
+{% macro empty_state(title, text="", icon_name="inbox") -%}
+<div class="empty-state">
+  <span class="empty-icon">{{ icon(icon_name) }}</span>
+  <p class="text-[13px] font-semibold text-ink">{{ title }}</p>
+  {% if text %}<p class="mt-1 max-w-sm text-[12px] leading-relaxed text-ink-muted">{{ text }}</p>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro pager(page, pages) -%}
+{% if pages > 1 %}
+<nav class="flex items-center justify-between gap-3 border-t border-line px-5 py-3" aria-label="Пагинация">
+  <span class="text-[11px] text-ink-dim">Страница {{ page }} из {{ pages }}</span>
+  <div class="flex items-center gap-1">
+    <a class="btn btn-secondary btn-sm {{ 'pointer-events-none opacity-40' if page <= 1 }}" href="{{ request.url.include_query_params(page=page-1) }}">{{ icon("chevron-left", "icon-sm") }} Назад</a>
+    <a class="btn btn-secondary btn-sm {{ 'pointer-events-none opacity-40' if page >= pages }}" href="{{ request.url.include_query_params(page=page+1) }}">Далее {{ icon("chevron-right", "icon-sm") }}</a>
+  </div>
+</nav>
+{% endif %}
+{%- endmacro %}
+
+{% macro field_label(text, for_id="") -%}
+<label class="label"{% if for_id %} for="{{ for_id }}"{% endif %}>{{ text }}</label>
+{%- endmacro %}

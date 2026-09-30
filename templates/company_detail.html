@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, avatar, status_badge, priority_badge, empty_state %}
+{% block title %}{{ company.name }} — {{ app_name }}{% endblock %}
+
+{% block topbar_actions %}
+<a href="/companies" class="btn btn-secondary btn-sm hidden sm:inline-flex">{{ icon("chevron-left", "icon-sm") }} Компании</a>
+{% endblock %}
+
+{% block content %}
+<div x-data="companyDetail()" x-init="init()">
+  <nav class="mb-4 flex items-center gap-1.5 text-[11px] text-ink-dim">
+    <a href="/" class="hover:text-ink">Обзор</a><span>/</span>
+    <a href="/companies" class="hover:text-ink">Компании</a><span>/</span>
+    <span class="truncate font-medium text-ink-muted">{{ company.name }}</span>
+  </nav>
+
+  <div class="page-head">
+    <div class="flex min-w-0 items-start gap-4">
+      <span class="grid h-14 w-14 shrink-0 place-items-center rounded-2xl border border-line bg-white font-display text-[18px] font-semibold uppercase text-ink-muted shadow-card">{{ company.name|initials }}</span>
+      <div class="min-w-0">
+        <div class="mb-1.5 flex flex-wrap items-center gap-2">
+          <span class="chip chip-neutral">{{ company.industry or 'Отрасль не указана' }}</span>
+          {% if company.size %}<span class="chip chip-neutral">{{ company.size }} сотрудников</span>{% endif %}
+          {% if company.owner %}<span class="chip chip-accent">{{ company.owner.full_name }}</span>{% endif %}
+        </div>
+        <h1 class="page-title truncate">{{ company.name }}</h1>
+        <p class="page-sub">
+          {% if company.domain %}<a class="link" href="{{ company.website if company.website.startswith('http') else 'https://' + company.domain }}" target="_blank" rel="noopener noreferrer">{{ company.domain }}</a> · {% endif %}
+          в базе с {{ company.created_at|dt('%d.%m.%Y') }}
+        </p>
+      </div>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <a href="/applications?new=1&client={{ company.name|urlencode }}&company_id={{ company.id }}" class="btn btn-primary">{{ icon("plus", "icon-sm") }} Сделка</a>
+      <a href="/contacts?new=1&company_id={{ company.id }}" class="btn btn-secondary">{{ icon("users", "icon-sm") }} Контакт</a>
+      <button type="button" class="btn btn-secondary" @click="openEdit()">{{ icon("edit", "icon-sm") }} Изменить</button>
+      <button type="button" class="btn btn-ghost text-rose-600 hover:bg-rose-50" @click="remove()" aria-label="Удалить компанию">{{ icon("trash", "icon-sm") }}</button>
+    </div>
+  </div>
+
+  <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="kpi kpi-accent"><p class="kpi-label">{{ icon("wallet", "icon-sm") }} Воронка</p><p class="kpi-value">{{ meta.pipeline_amount|money }}</p><p class="kpi-note">по {{ meta.deals_count }} сделкам</p></div>
+    <div class="kpi"><p class="kpi-label">{{ icon("briefcase", "icon-sm") }} Открытые сделки</p><p class="kpi-value">{{ meta.open_deals_count }}</p><p class="kpi-note">в работе и новые</p></div>
+    <div class="kpi"><p class="kpi-label">{{ icon("users", "icon-sm") }} Контакты</p><p class="kpi-value">{{ contacts|length }}</p><p class="kpi-note">людей в компании</p></div>
+    <div class="kpi"><p class="kpi-label">{{ icon("target", "icon-sm") }} Закрытые</p><p class="kpi-value">{{ deals|selectattr('status', 'equalto', 'done')|list|length }}</p><p class="kpi-note">успешных сделок</p></div>
+  </div>
+
+  <div class="mt-4 grid gap-4 xl:grid-cols-[1.55fr_1fr]">
+    <div class="space-y-4">
+      <section class="card overflow-hidden">
+        <div class="card-header">
+          <div><h2 class="card-title">Сделки компании</h2><p class="card-hint">Все обращения и проекты</p></div>
+          <a href="/applications?company_id={{ company.id }}" class="btn btn-secondary btn-sm">Все {{ icon("arrow-right", "icon-sm") }}</a>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Сделка</th><th>Статус</th><th>Приоритет</th><th class="text-right">Сумма</th><th>Срок</th><th>Ответственный</th></tr></thead>
+            <tbody>
+              {% for deal in deals %}
+              <tr class="{{ 'row-muted' if deal.status == 'cancelled' }}">
+                <td class="max-w-[300px]"><a href="/applications/{{ deal.id }}" class="block truncate font-medium text-ink hover:text-accent">{{ deal.title }}</a><span class="text-[10px] text-ink-dim">#{{ deal.id }} · {{ deal.created_at|dt('%d.%m.%Y') }}</span></td>
+                <td>{{ status_badge(deal.status) }}</td>
+                <td>{{ priority_badge(deal.priority) }}</td>
+                <td class="text-right font-medium tabular-nums text-ink-soft">{{ deal.amount|money }}</td>
+                <td class="whitespace-nowrap text-[11px] {{ 'overdue' if is_overdue(deal.due_date, deal.status) else 'text-ink-muted' }}">{{ deal.due_date|day_label if deal.due_date else '—' }}</td>
+                <td>{% if deal.assigned_to %}<span class="flex items-center gap-1.5">{{ avatar(deal.assigned_to.full_name, 'avatar-sm h-5 w-5 text-[8px]') }}<span class="max-w-[110px] truncate text-[11px] text-ink-soft">{{ deal.assigned_to.full_name }}</span></span>{% else %}<span class="text-[11px] text-ink-dim">—</span>{% endif %}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="6">{{ empty_state("Сделок пока нет", "Создайте первую сделку для этой компании.", "briefcase") }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {% if company.notes %}
+      <section class="card">
+        <div class="card-header"><h2 class="card-title">Заметки</h2><button type="button" class="btn btn-ghost btn-sm" @click="openEdit()">Изменить</button></div>
+        <div class="card-body"><p class="whitespace-pre-line text-[13px] leading-relaxed text-ink-soft">{{ company.notes }}</p></div>
+      </section>
+      {% endif %}
+    </div>
+
+    <aside class="space-y-4">
+      <section class="card">
+        <div class="card-header"><h2 class="card-title">Реквизиты</h2></div>
+        <div class="card-body">
+          <dl class="space-y-3 text-[11.5px]">
+            {% if company.email %}<div class="flex items-start gap-2"><span class="mt-0.5 text-ink-dim">{{ icon("mail", "icon-sm") }}</span><a class="break-all text-ink-soft hover:text-accent" href="mailto:{{ company.email }}">{{ company.email }}</a></div>{% endif %}
+            {% if company.phone %}<div class="flex items-start gap-2"><span class="mt-0.5 text-ink-dim">{{ icon("phone", "icon-sm") }}</span><a class="text-ink-soft hover:text-accent" href="tel:{{ company.phone }}">{{ company.phone }}</a></div>{% endif %}
+            {% if company.website %}<div class="flex items-start gap-2"><span class="mt-0.5 text-ink-dim">{{ icon("globe", "icon-sm") }}</span><a class="break-all text-ink-soft hover:text-accent" href="{{ company.website if company.website.startswith('http') else 'https://' + company.website }}" target="_blank" rel="noopener noreferrer">{{ company.website }}</a></div>{% endif %}
+            {% if company.address %}<div class="flex items-start gap-2"><span class="mt-0.5 text-ink-dim">{{ icon("building", "icon-sm") }}</span><span class="text-ink-soft">{{ company.address }}</span></div>{% endif %}
+            {% if not company.email and not company.phone and not company.website and not company.address %}<p class="text-[11.5px] text-ink-dim">Контакты не заполнены.</p>{% endif %}
+          </dl>
+          <div class="mt-4 border-t border-line pt-3.5">
+            <p class="section-label mb-2">Ответственный</p>
+            {% if company.owner %}<div class="flex items-center gap-2.5">{{ avatar(company.owner.full_name) }}<div><p class="text-[12px] font-semibold text-ink">{{ company.owner.full_name }}</p><p class="text-[10.5px] text-ink-dim">{{ company.owner.job_title or company.owner.email }}</p></div></div>
+            {% else %}<p class="text-[11.5px] text-ink-dim">Не назначен</p>{% endif %}
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <div><h2 class="card-title">Контакты</h2><p class="card-hint">{{ contacts|length }} человек</p></div>
+          <a href="/contacts?company_id={{ company.id }}" class="btn-icon-sm" aria-label="Все контакты">{{ icon("arrow-right", "icon-sm") }}</a>
+        </div>
+        <div class="divide-y divide-line/80">
+          {% for contact in contacts %}
+          <a href="/contacts/{{ contact.id }}" class="flex items-center gap-3 px-5 py-3 hover:bg-zinc-50">
+            {{ avatar(contact.full_name, 'avatar-sm') }}
+            <span class="min-w-0 flex-1">
+              <span class="block truncate text-[12px] font-medium text-ink">{{ contact.full_name }}{% if contact.is_primary %}<span class="ml-1 text-[9px] text-accent">основной</span>{% endif %}</span>
+              <span class="block truncate text-[10.5px] text-ink-dim">{{ contact.position or contact.email or 'Контакт' }}</span>
+            </span>
+            {% if contact.phone %}<span class="text-[10.5px] text-ink-dim">{{ contact.phone }}</span>{% endif %}
+          </a>
+          {% else %}
+          <div class="px-5 py-8 text-center"><p class="text-[12px] font-medium text-ink-muted">Контактов нет</p><a href="/contacts?new=1&company_id={{ company.id }}" class="mt-1 inline-block text-[11px] link">Добавить контакт</a></div>
+          {% endfor %}
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <div x-show="modalOpen" x-cloak class="modal-backdrop" @click.self="modalOpen = false" @keydown.escape.window="modalOpen = false">
+    <div class="modal-panel max-w-[640px] animate-fade-up">
+      <div class="modal-head">
+        <h2 class="text-[15px] font-semibold text-ink">Редактирование компании</h2>
+        <button type="button" class="btn-icon" @click="modalOpen = false" aria-label="Закрыть">{{ icon("x") }}</button>
+      </div>
+      <form @submit.prevent="save()">
+        <div class="modal-body space-y-4">
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div><label class="label">Название *</label><input class="field" x-model.trim="form.name" required></div>
+            <div><label class="label">Отрасль</label><input class="field" x-model.trim="form.industry"></div>
+            <div><label class="label">Домен</label><input class="field" x-model.trim="form.domain"></div>
+            <div><label class="label">Сайт</label><input class="field" x-model.trim="form.website"></div>
+            <div><label class="label">Email</label><input type="email" class="field" x-model.trim="form.email"></div>
+            <div><label class="label">Телефон</label><input class="field" x-model.trim="form.phone"></div>
+            <div><label class="label">Размер</label><select class="field" x-model="form.size"><option value="">Не указан</option><option value="1–10">1–10</option><option value="11–50">11–50</option><option value="51–200">51–200</option><option value="201–500">201–500</option><option value="500+">500+</option></select></div>
+            <div><label class="label">Ответственный</label><select class="field" x-model.number="form.owner_id"><option value="">Не назначен</option>{% for member in team %}<option value="{{ member.id }}">{{ member.full_name }}</option>{% endfor %}</select></div>
+          </div>
+          <div><label class="label">Адрес</label><input class="field" x-model.trim="form.address"></div>
+          <div><label class="label">Заметки</label><textarea class="field min-h-[90px] resize-y" x-model="form.notes"></textarea></div>
+          <p x-show="error" x-cloak class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] font-medium text-rose-700" x-text="error"></p>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn btn-secondary" @click="modalOpen = false">Отмена</button>
+          <button type="submit" class="btn btn-primary" :disabled="saving" x-text="saving ? 'Сохраняем…' : 'Сохранить'"></button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.companyDetail = function () {
+  return {
+    modalOpen: false, saving: false, error: '',
+    form: {{ {
+      "name": company.name, "industry": company.industry, "domain": company.domain, "website": company.website,
+      "email": company.email, "phone": company.phone, "size": company.size, "address": company.address,
+      "notes": company.notes, "owner_id": company.owner_id
+    }|tojson }},
+    companyId: {{ company.id }},
+    init() {},
+    openEdit() { this.error = ''; this.modalOpen = true; },
+    async save() {
+      if (!this.form.name.trim()) { this.error = 'Укажите название'; return; }
+      this.saving = true; this.error = '';
+      const payload = Object.assign({}, this.form, { owner_id: this.form.owner_id ? Number(this.form.owner_id) : null });
+      try {
+        await apiJson('/api/companies/' + this.companyId, { method: 'PATCH', body: JSON.stringify(payload) });
+        window.location.href = '/companies/' + this.companyId + '?msg=' + encodeURIComponent('Компания обновлена');
+      } catch (error) { this.error = error.message; }
+      finally { this.saving = false; }
+    },
+    async remove() {
+      const ok = await confirmAction({ title: 'Удалить компанию?', text: 'Связанные контакты и сделки потеряют привязку к компании.', confirmText: 'Удалить', danger: true });
+      if (!ok) return;
+      try {
+        await apiJson('/api/companies/' + this.companyId, { method: 'DELETE' });
+        window.location.href = '/companies?msg=' + encodeURIComponent('Компания удалена');
+      } catch (error) { toast(error.message, 'error'); }
+    },
+  };
+};
+</script>
+{% endblock %}

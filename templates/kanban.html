@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, avatar, empty_state %}
+{% block title %}Канбан — {{ app_name }}{% endblock %}
+
+{% block topbar_actions %}
+<a href="/applications?new=1" class="btn btn-primary btn-sm hidden sm:inline-flex">{{ icon("plus", "icon-sm") }} Сделка</a>
+{% endblock %}
+
+{% block content %}
+<div x-data="kanbanPage()" x-init="load()">
+  <div class="page-head">
+    <div>
+      <p class="eyebrow">Pipeline board</p>
+      <h1 class="page-title">Канбан сделок</h1>
+      <p class="page-sub">Перетаскивайте карточки между этапами — статус обновится мгновенно и попадёт в журнал.</p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <div class="search-box w-[220px]">
+        {{ icon("search", "icon-sm") }}
+        <input type="search" x-model="q" @input.debounce.300ms="load()" placeholder="Поиск по доске…" aria-label="Поиск по канбану">
+      </div>
+      <select class="field field-sm w-auto" x-model="assignee" @change="load()" aria-label="Ответственный">
+        <option value="">Вся команда</option>
+        <option value="unassigned">Без ответственного</option>
+        {% for member in team %}<option value="{{ member.id }}">{{ member.full_name }}</option>{% endfor %}
+      </select>
+      <button type="button" class="btn btn-secondary btn-sm" @click="load()" :disabled="loading">{{ icon("refresh", "icon-sm") }}</button>
+      <a href="/applications" class="btn btn-secondary">{{ icon("inbox", "icon-sm") }} Списком</a>
+    </div>
+  </div>
+
+  <div class="mb-4 flex flex-wrap items-center gap-3 text-[11px] text-ink-dim">
+    <span>Всего на доске: <span class="font-semibold text-ink-soft" x-text="count"></span></span>
+    <span class="h-3 w-px bg-line"></span>
+    <span>Сумма открытых: <span class="font-semibold text-ink-soft" x-text="formatMoney(openTotal)"></span></span>
+    <span class="ml-auto flex items-center gap-1.5"><span class="h-1.5 w-1.5 rounded-full bg-accent"></span> Изменения сохраняются автоматически</span>
+  </div>
+
+  <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+    <template x-for="column in columns" :key="column.key">
+      <section class="kanban-column" :class="dragOver === column.key ? 'kanban-drop' : ''"
+        @dragover.prevent="dragOver = column.key" @dragleave="dragOver = (dragOver === column.key ? '' : dragOver)" @drop.prevent="drop(column.key)">
+        <header class="kanban-head">
+          <span class="h-2 w-2 rounded-full" :class="column.dot"></span>
+          <h2 class="text-[12px] font-semibold text-ink" x-text="column.label"></h2>
+          <span class="chip chip-neutral ml-auto h-[19px] px-1.5 text-[9.5px]" x-text="column.items.length"></span>
+          <a class="btn-icon-sm" :href="'/applications?new=1&status=' + column.key" :aria-label="'Добавить в ' + column.label">{{ icon("plus", "icon-sm") }}</a>
+        </header>
+
+        <div class="flex-1 space-y-2 overflow-y-auto p-2.5">
+          <template x-for="item in column.items" :key="item.id">
+            <article class="kanban-card" draggable="true" @dragstart="dragStart(item)" @dragend="dragEnd()" :class="dragging === item.id ? 'dragging' : ''">
+              <div class="flex items-start gap-1.5">
+                <a class="min-w-0 flex-1" :href="'/applications/' + item.id">
+                  <span class="mb-1 flex items-center gap-1.5 text-[9.5px] font-semibold uppercase tracking-[0.1em] text-ink-dim">
+                    <span x-text="'#' + item.id"></span>
+                    <span x-show="item.starred" class="text-amber-500">★</span>
+                  </span>
+                  <span class="block text-[12.5px] font-semibold leading-snug text-ink hover:text-accent" x-text="item.title"></span>
+                </a>
+                <span class="chip h-[19px] shrink-0 px-1.5 text-[9px]" :class="priorityChip(item.priority)" x-text="priorityLabel(item.priority)"></span>
+              </div>
+
+              <p class="mt-1.5 truncate text-[10.5px] text-ink-dim" x-text="item.company_name || item.client_name || 'Без клиента'"></p>
+
+              <div class="mt-2 flex items-center justify-between gap-2 border-t border-line/70 pt-2">
+                <span class="text-[11px] font-semibold tabular-nums text-ink-soft" x-text="formatMoney(item.amount)"></span>
+                <span class="text-[10px]" :class="isOverdue(item) ? 'overdue' : 'text-ink-dim'" x-text="item.due_date ? dueLabel(item.due_date) : 'без срока'"></span>
+              </div>
+
+              <div class="mt-2 flex items-center justify-between gap-2">
+                <div class="flex items-center gap-1.5" x-show="item.assigned_to_name">
+                  <span class="avatar avatar-sm h-5 w-5 text-[8px]" x-text="initials(item.assigned_to_name)"></span>
+                  <span class="max-w-[100px] truncate text-[10px] text-ink-muted" x-text="item.assigned_to_name"></span>
+                </div>
+                <div class="flex items-center gap-2 text-[9.5px] text-ink-dim">
+                  <span x-show="item.open_tasks_count > 0" class="flex items-center gap-0.5" x-text="'✓ ' + item.open_tasks_count"></span>
+                  <span x-show="item.comments_count > 0" class="flex items-center gap-0.5" x-text="'💬 ' + item.comments_count"></span>
+                </div>
+              </div>
+
+              <select class="field field-sm mt-2 py-1 text-[10px] sm:hidden" :value="item.status" @change="move(item, $event.target.value)" aria-label="Переместить сделку">
+                <option value="new">Новая</option>
+                <option value="in_progress">В работе</option>
+                <option value="done">Выполнена</option>
+                <option value="cancelled">Отменена</option>
+              </select>
+            </article>
+          </template>
+
+          <div x-show="!column.items.length" class="flex min-h-[120px] flex-col items-center justify-center rounded-xl border border-dashed border-line px-3 text-center">
+            <span class="text-[10.5px] text-ink-dim">Перетащите сделку сюда</span>
+          </div>
+        </div>
+
+        <footer class="flex items-center justify-between border-t border-line px-3 py-2 text-[10px] text-ink-dim">
+          <span>Сумма</span>
+          <span class="font-semibold tabular-nums text-ink-soft" x-text="formatMoney(columnTotal(column))"></span>
+        </footer>
+      </section>
+    </template>
+  </div>
+
+  <div x-show="loading" x-cloak class="fixed inset-0 z-20 grid place-items-center bg-canvas/60 backdrop-blur-[1px]">
+    <span class="flex items-center gap-2 rounded-xl border border-line bg-white px-4 py-2.5 text-[12px] font-medium text-ink-muted shadow-card">
+      <svg class="icon icon-sm animate-spin"><use href="#i-refresh"></use></svg> Собираем доску…
+    </span>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.kanbanPage = function () {
+  return {
+    columns: [
+      { key: 'new', label: 'Новые', dot: 'bg-blue-500', items: [] },
+      { key: 'in_progress', label: 'В работе', dot: 'bg-amber-500', items: [] },
+      { key: 'done', label: 'Выполнены', dot: 'bg-emerald-500', items: [] },
+      { key: 'cancelled', label: 'Отменены', dot: 'bg-zinc-400', items: [] },
+    ],
+    q: '', assignee: '', loading: true, dragging: null, dragOver: '',
+
+    get count() { return this.columns.reduce((sum, column) => sum + column.items.length, 0); },
+    get openTotal() {
+      return this.columns.filter((column) => column.key === 'new' || column.key === 'in_progress')
+        .reduce((sum, column) => sum + column.items.reduce((inner, item) => inner + Number(item.amount || 0), 0), 0);
+    },
+    columnTotal(column) { return column.items.reduce((sum, item) => sum + Number(item.amount || 0), 0); },
+
+    async load() {
+      this.loading = true;
+      try {
+        const results = await Promise.all(this.columns.map(async (column) => {
+          const params = new URLSearchParams({ status: column.key, limit: '100', sort: 'updated_at', order: 'desc' });
+          if (this.q.trim()) params.set('q', this.q.trim());
+          if (this.assignee === 'unassigned') params.set('unassigned', 'true');
+          else if (this.assignee) params.set('assigned_to_id', this.assignee);
+          const data = await apiJson('/api/applications?' + params.toString());
+          return data.items || [];
+        }));
+        this.columns.forEach((column, index) => { column.items = results[index]; });
+      } catch (error) { toast(error.message, 'error'); }
+      finally { this.loading = false; }
+    },
+
+    dragStart(item) { this.dragging = item.id; },
+    dragEnd() { this.dragging = null; this.dragOver = ''; },
+
+    async drop(status) {
+      this.dragOver = '';
+      const item = this.columns.flatMap((column) => column.items).find((entry) => entry.id === this.dragging);
+      this.dragging = null;
+      if (!item || item.status === status) return;
+      await this.move(item, status);
+    },
+
+    async move(item, status) {
+      const from = item.status;
+      if (from === status) return;
+      const source = this.columns.find((column) => column.key === from);
+      const target = this.columns.find((column) => column.key === status);
+      if (source) source.items = source.items.filter((entry) => entry.id !== item.id);
+      item.status = status;
+      if (target) target.items.unshift(item);
+      try {
+        await apiJson('/api/applications/' + item.id + '/status', { method: 'PATCH', body: JSON.stringify({ status }) });
+        toast('Сделка #' + item.id + ' → ' + statusLabel(status));
+      } catch (error) {
+        toast(error.message, 'error');
+        this.load();
+      }
+    },
+  };
+};
+</script>
+{% endblock %}

@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, avatar, status_badge, empty_state %}
+{% block title %}Отчёты — {{ app_name }}{% endblock %}
+
+{% block topbar_actions %}
+<button type="button" class="btn btn-secondary btn-sm hidden sm:inline-flex" onclick="window.print()">{{ icon("download", "icon-sm") }} Печать</button>
+{% endblock %}
+
+{% block content %}
+{% set months_max = [report.months|map(attribute='created')|max, report.months|map(attribute='won')|max, 1]|max %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Analytics</p>
+    <h1 class="page-title">Отчёты и аналитика</h1>
+    <p class="page-sub">Конверсия, скорость закрытия, эффективность команды и структура выручки за выбранный период.</p>
+  </div>
+  <div class="flex flex-wrap items-center gap-2">
+    <div class="flex rounded-lg border border-line bg-white p-0.5 shadow-card">
+      {% for value, label in [(7, '7 дней'), (30, '30 дней'), (90, '90 дней')] %}
+      <a href="/reports?days={{ value }}" class="rounded-md px-3 py-1.5 text-[11.5px] font-semibold transition {{ 'bg-ink text-white shadow-sm' if days == value else 'text-ink-muted hover:bg-zinc-50 hover:text-ink' }}">{{ label }}</a>
+      {% endfor %}
+    </div>
+    <button type="button" class="btn btn-secondary" onclick="window.print()">{{ icon("download", "icon-sm") }} Печать отчёта</button>
+  </div>
+</div>
+
+<div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+  <div class="kpi kpi-accent">
+    <p class="kpi-label">{{ icon("inbox", "icon-sm") }} Новые за период</p>
+    <p class="kpi-value">{{ report.in_period }}</p>
+    <p class="kpi-note">всего в системе — {{ report.total }}</p>
+  </div>
+  <div class="kpi">
+    <p class="kpi-label">{{ icon("target", "icon-sm") }} Win rate</p>
+    <p class="kpi-value">{{ report.win_rate }}%</p>
+    <p class="kpi-note">{{ report.won }} успешных · {{ report.lost }} отказов</p>
+  </div>
+  <div class="kpi">
+    <p class="kpi-label">{{ icon("clock", "icon-sm") }} Цикл сделки</p>
+    <p class="kpi-value">{{ report.avg_cycle }} <span class="text-[14px] font-medium text-ink-dim">дн</span></p>
+    <p class="kpi-note">среднее время до закрытия</p>
+  </div>
+  <div class="kpi {{ 'border-rose-200 bg-rose-50/40' if report.overdue }}">
+    <p class="kpi-label {{ 'text-rose-600' if report.overdue }}">{{ icon("alert", "icon-sm") }} Просрочено сейчас</p>
+    <p class="kpi-value {{ 'text-rose-700' if report.overdue }}">{{ report.overdue }}</p>
+    <p class="kpi-note">сделок с истёкшим сроком</p>
+  </div>
+</div>
+
+<div class="mt-4 grid gap-4 xl:grid-cols-[1.5fr_1fr]">
+  <section class="card">
+    <div class="card-header">
+      <div><h2 class="card-title">Объём по месяцам</h2><p class="card-hint">Создано и успешно закрыто за 6 месяцев</p></div>
+      <div class="flex items-center gap-4 text-[10.5px] text-ink-dim"><span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-sm bg-accent"></span> Создано</span><span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-sm bg-zinc-300"></span> Закрыто</span></div>
+    </div>
+    <div class="card-body">
+      <div class="flex h-[200px] items-end gap-3">
+        {% for month in report.months %}
+        <div class="flex h-full flex-1 flex-col justify-end gap-1.5">
+          <div class="flex h-full items-end justify-center gap-1">
+            <div class="chart-bar w-full max-w-[18px] bg-accent/85" style="height: {{ ((month.created / months_max) * 100)|round(1) }}%" title="{{ month.label }} · создано {{ month.created }}"></div>
+            <div class="chart-bar w-full max-w-[18px] bg-zinc-300" style="height: {{ ((month.won / months_max) * 100)|round(1) }}%" title="{{ month.label }} · закрыто {{ month.won }}"></div>
+          </div>
+          <div class="text-center"><p class="text-[10px] tabular-nums text-ink-dim">{{ month.label }}</p><p class="text-[9px] text-ink-dim">{{ month.created }} / {{ month.won }}</p></div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header"><div><h2 class="card-title">Воронка</h2><p class="card-hint">Текущее распределение статусов</p></div></div>
+    <div class="card-body space-y-4">
+      {% set total = report.funnel|sum(attribute='count') %}
+      {% for stage in report.funnel %}
+      <div>
+        <div class="mb-1.5 flex items-center justify-between text-[11.5px]">
+          <span class="flex items-center gap-2 font-medium text-ink-soft"><span class="chip {{ statusClass(stage.key) }} h-[18px] px-1.5 text-[9px]">{{ statusLabel(stage.key) }}</span></span>
+          <span class="tabular-nums text-ink-dim">{{ stage.count }} · {{ ((stage.count / total * 100) if total else 0)|round|int }}%</span>
+        </div>
+        <div class="metric-bar"><span class="{{ {'new':'bg-blue-500','in_progress':'bg-amber-500','done':'bg-emerald-500','cancelled':'bg-zinc-400'}[stage.key] }}" style="width: {{ ((stage.count / total * 100) if total else 0)|round(1) }}%"></span></div>
+      </div>
+      {% endfor %}
+      <div class="rounded-xl border border-line bg-zinc-50/70 p-3.5">
+        <div class="flex items-center justify-between"><span class="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-dim">Закрыто за период</span><span class="font-display text-[20px] font-semibold text-ink">{{ report.closed_in_period }}</span></div>
+        <p class="mt-1 text-[10.5px] text-ink-dim">из {{ report.in_period }} новых обращений</p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="mt-4 grid gap-4 xl:grid-cols-2">
+  <section class="card overflow-hidden">
+    <div class="card-header"><div><h2 class="card-title">Категории</h2><p class="card-hint">Количество и сумма сделок</p></div></div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Категория</th><th class="text-right">Сделок</th><th class="text-right">Сумма</th><th class="w-[30%]">Доля</th></tr></thead>
+        <tbody>
+          {% set cat_max = [report.categories|map(attribute='count')|max, 1]|max %}
+          {% for category in report.categories %}
+          <tr>
+            <td><span class="font-medium text-ink">{{ category.key|categoryLabel }}</span></td>
+            <td class="text-right tabular-nums text-ink-soft">{{ category.count }}</td>
+            <td class="text-right tabular-nums text-ink-soft">{{ category.amount|money }}</td>
+            <td><div class="metric-bar"><span style="width: {{ (category.count / cat_max * 100)|round(1) }}%"></span></div></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4">{{ empty_state("Нет данных", "Создайте сделки, чтобы увидеть категории.", "chart") }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header"><div><h2 class="card-title">Источники</h2><p class="card-hint">Откуда приходят обращения за период</p></div></div>
+    <div class="card-body">
+      {% if report.sources %}
+      {% set source_max = [report.sources|map(attribute='count')|max, 1]|max %}
+      <div class="space-y-4">
+        {% for source in report.sources %}
+        <div>
+          <div class="mb-1.5 flex items-center justify-between text-[11.5px]"><span class="font-medium text-ink-soft">{{ source.key|sourceLabel }}</span><span class="tabular-nums text-ink-dim">{{ source.count }}</span></div>
+          <div class="metric-bar"><span style="width: {{ (source.count / source_max * 100)|round(1) }}%"></span></div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      {{ empty_state("Нет данных об источниках", "За выбранный период новых обращений не было.", "trend") }}
+      {% endif %}
+    </div>
+  </section>
+</div>
+
+<div class="mt-4 grid gap-4 xl:grid-cols-[1.55fr_1fr]">
+  <section class="card overflow-hidden">
+    <div class="card-header"><div><h2 class="card-title">Эффективность команды</h2><p class="card-hint">Сделки, созданные за период</p></div><a href="/users" class="btn btn-ghost btn-sm">Сотрудники</a></div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Сотрудник</th><th class="text-right">Сделок</th><th class="text-right">Успешных</th><th class="text-right">Конверсия</th><th class="text-right">Сумма</th></tr></thead>
+        <tbody>
+          {% for member in report.team %}
+          <tr>
+            <td><span class="flex items-center gap-2.5">{{ avatar(member.name, 'avatar-sm') }}<span class="font-medium text-ink">{{ member.name }}</span></span></td>
+            <td class="text-right tabular-nums text-ink-soft">{{ member.total }}</td>
+            <td class="text-right tabular-nums text-emerald-700">{{ member.won }}</td>
+            <td class="text-right tabular-nums text-ink-soft">{{ ((member.won / member.total * 100) if member.total else 0)|round|int }}%</td>
+            <td class="text-right font-medium tabular-nums text-ink-soft">{{ member.amount|money }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5">{{ empty_state("Нет данных", "За период сделки не создавались.", "users") }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header"><div><h2 class="card-title">Причины отказов</h2><p class="card-hint">Что мешает закрывать сделки</p></div></div>
+    <div class="card-body">
+      {% if report.lost_reasons %}
+      {% set lost_max = [report.lost_reasons|map(attribute='count')|max, 1]|max %}
+      <div class="space-y-3.5">
+        {% for item in report.lost_reasons %}
+        <div>
+          <div class="mb-1.5 flex items-center justify-between gap-2 text-[11.5px]"><span class="truncate text-ink-soft">{{ item.reason }}</span><span class="shrink-0 tabular-nums text-ink-dim">{{ item.count }}</span></div>
+          <div class="metric-bar"><span class="bg-rose-400" style="width: {{ (item.count / lost_max * 100)|round(1) }}%"></span></div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="py-6 text-center"><p class="text-[12px] font-medium text-ink-muted">Отказов с причиной нет</p><p class="mt-1 text-[11px] text-ink-dim">Указывайте причину при отмене сделки — это улучшит аналитику</p></div>
+      {% endif %}
+      <div class="mt-4 border-t border-line pt-3.5 text-[10.5px] leading-relaxed text-ink-dim">
+        Показатели рассчитываются по дате закрытия сделки. Win rate = успешные / (успешные + отказы) за период.
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}

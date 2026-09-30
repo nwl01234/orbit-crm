@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, avatar, empty_state, pager with context %}
+{% block title %}Журнал действий — {{ app_name }}{% endblock %}
+
+{% block topbar_actions %}
+<a href="/users" class="btn btn-secondary btn-sm hidden sm:inline-flex">{{ icon("users", "icon-sm") }} Сотрудники</a>
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Audit trail</p>
+    <h1 class="page-title">Журнал действий</h1>
+    <p class="page-sub">Полная история изменений: кто, что и когда сделал. Записей: {{ total }}. Доступ только для администраторов.</p>
+  </div>
+  <div class="flex flex-wrap items-center gap-2">
+    <select class="field field-sm w-auto" onchange="window.location.href='/logs?action=' + encodeURIComponent(this.value)">
+      <option value="">Все действия</option>
+      {% for key, label in actions %}<option value="{{ key }}" {{ 'selected' if action == key }}>{{ label }}</option>{% endfor %}
+    </select>
+    <button type="button" class="btn btn-secondary" onclick="window.print()">{{ icon("download", "icon-sm") }} Печать</button>
+  </div>
+</div>
+
+<section class="card overflow-hidden">
+  <form method="get" action="/logs" class="flex flex-wrap items-center gap-2 border-b border-line p-3">
+    <div class="search-box min-w-[220px] flex-1">
+      {{ icon("search", "icon-sm") }}
+      <input type="search" name="q" value="{{ q }}" placeholder="Поиск по деталям события…" aria-label="Поиск в журнале">
+    </div>
+    <select class="field field-sm w-auto" name="action" aria-label="Действие">
+      <option value="">Все действия</option>
+      {% for key, label in actions %}<option value="{{ key }}" {{ 'selected' if action == key }}>{{ label }}</option>{% endfor %}
+    </select>
+    <select class="field field-sm w-auto" name="user_id" aria-label="Сотрудник">
+      <option value="">Все сотрудники</option>
+      {% for member in team %}<option value="{{ member.id }}" {{ 'selected' if user_id == member.id }}>{{ member.full_name }}</option>{% endfor %}
+    </select>
+    <button type="submit" class="btn btn-secondary btn-sm">{{ icon("filter", "icon-sm") }} Фильтр</button>
+    {% if action or user_id or q %}<a href="/logs" class="btn btn-ghost btn-sm">Сбросить</a>{% endif %}
+  </form>
+
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th class="w-[150px]">Когда</th><th>Сотрудник</th><th>Действие</th><th>Объект</th><th>Детали</th></tr></thead>
+      <tbody>
+        {% for entry in logs %}
+        <tr>
+          <td class="whitespace-nowrap">
+            <span class="block text-[11.5px] font-medium text-ink-soft">{{ entry.created_at|dt('%d.%m.%Y') }}</span>
+            <span class="block text-[10px] tabular-nums text-ink-dim">{{ entry.created_at|dt('%H:%M:%S') }} · {{ entry.created_at|relative }}</span>
+          </td>
+          <td>
+            {% if entry.user %}
+            <span class="flex items-center gap-2">{{ avatar(entry.user.full_name, 'avatar-sm') }}<span class="max-w-[140px] truncate text-[11.5px] text-ink-soft">{{ entry.user.full_name }}</span></span>
+            {% else %}<span class="text-[11px] text-ink-dim">Система</span>{% endif %}
+          </td>
+          <td>
+            {% set tone = 'chip-neutral' %}
+            {% if entry.action in ('delete', 'delete_task', 'company_delete', 'contact_delete') %}{% set tone = 'priority-urgent' %}
+            {% elif entry.action in ('create', 'company_create', 'contact_create', 'create_task') %}{% set tone = 'status-done' %}
+            {% elif entry.action in ('status_change', 'bulk_status', 'update', 'company_update', 'contact_update') %}{% set tone = 'status-progress' %}
+            {% elif entry.action in ('login', 'logout') %}{% set tone = 'chip-neutral' %}
+            {% endif %}
+            <span class="chip {{ tone }}">{{ actionLabel(entry.action) }}</span>
+          </td>
+          <td class="whitespace-nowrap">
+            {% if entry.entity_type == 'application' and entry.entity_id %}
+            <a class="link text-[11.5px]" href="/applications/{{ entry.entity_id }}">Сделка #{{ entry.entity_id }}</a>
+            {% elif entry.entity_type == 'company' and entry.entity_id %}
+            <a class="link text-[11.5px]" href="/companies/{{ entry.entity_id }}">Компания #{{ entry.entity_id }}</a>
+            {% elif entry.entity_type == 'contact' and entry.entity_id %}
+            <a class="link text-[11.5px]" href="/contacts/{{ entry.entity_id }}">Контакт #{{ entry.entity_id }}</a>
+            {% elif entry.entity_type == 'user' and entry.entity_id %}
+            <a class="link text-[11.5px]" href="/users">Сотрудник #{{ entry.entity_id }}</a>
+            {% elif entry.entity_type == 'task' and entry.entity_id %}
+            <a class="link text-[11.5px]" href="/tasks">Задача #{{ entry.entity_id }}</a>
+            {% else %}
+            <span class="text-[11px] text-ink-dim">{{ entry.entity_type or 'система' }}{% if entry.entity_id %} #{{ entry.entity_id }}{% endif %}</span>
+            {% endif %}
+          </td>
+          <td class="max-w-[360px]"><span class="block truncate text-[11.5px] text-ink-muted" title="{{ entry.details }}">{{ entry.details or '—' }}</span></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5">{{ empty_state("Событий не найдено", "Измените фильтры или выполните действие в CRM.", "history") }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {{ pager(page, pages) }}
+</section>
+
+<div class="mt-4 grid gap-3 sm:grid-cols-3">
+  <div class="card p-4"><p class="kpi-label">{{ icon("history", "icon-sm") }} Всего событий</p><p class="mt-2 font-display text-[24px] font-semibold text-ink">{{ total }}</p><p class="mt-1 text-[10.5px] text-ink-dim">по текущему фильтру</p></div>
+  <div class="card p-4"><p class="kpi-label">{{ icon("users", "icon-sm") }} Участников</p><p class="mt-2 font-display text-[24px] font-semibold text-ink">{{ logs|map(attribute='user_id')|select|unique|list|length }}</p><p class="mt-1 text-[10.5px] text-ink-dim">на текущей странице</p></div>
+  <div class="card p-4"><p class="kpi-label">{{ icon("shield", "icon-sm") }} Хранение</p><p class="mt-2 text-[12px] font-medium leading-snug text-ink-soft">Журнал неизменяем</p><p class="mt-1 text-[10.5px] text-ink-dim">записи только добавляются, удаление UI недоступно</p></div>
+</div>
+{% endblock %}
