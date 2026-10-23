@@ -81,5 +81,14 @@ python run.py                   # http://localhost:8000
 - [ ] REST API для мобильных клиентов
 - [ ] Воронка продаж (kanban)
 
+## Скриншоты
+
+| | |
+|---|---|
+| ![Вход](.assets/screens/01.png) | ![Дашборд](.assets/screens/02.png) |
+| ![Заявки](.assets/screens/03.png) | ![Карточка заявки](.assets/screens/04.png) |
+| ![Клиенты](.assets/screens/05.png) | ![AI-ассистент](.assets/screens/06.png) |
+| ![Канбан](.assets/screens/07.png) | |
+
 ---
 Часть портфолио: [mini-crm](https://github.com/nwl01234/mini-crm) → **orbit-crm** → [pulse-crm](https://github.com/nwl01234/pulse-crm) · [business-flow-automator](https://github.com/nwl01234/business-flow-automator)
